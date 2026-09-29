@@ -9,7 +9,7 @@
 // existing Faction Charts tab below the existing charts:
 //
 //   ?colour=A|B|C|D|E   the difficulty colours
-//   ?share=1|2|3|4      where the share count is shown
+//   ?share=1|2|3|4|5    where the share count is shown
 //   ?reverse=1          flip which end of the ramp is the hard end
 //   ?targets=0          hide each attacker's figures
 //   ?metric=targets|fair|mean|rivals   which attacker figure the top edge shows
@@ -106,6 +106,7 @@ const SHARES = [
   { key: "2", name: "Bars in the margins" },
   { key: "3", name: "Shaded strips in the margins" },
   { key: "4", name: "Fade inside the cell" },
+  { key: "5", name: "Hover only, attacker bars along the top" },
 ];
 
 const CVDS = ["none", "deutan", "protan", "tritan"];
@@ -485,11 +486,13 @@ function Legend({ m, scale, look }: { m: Model; scale: Scale; look: Look }) {
           </div>
         </div>
       )}
-      {(look.share == "2" || look.share == "3") && (
+      {(look.share == "2" || look.share == "3" || look.share == "5") && (
         <div className="max-w-xs">
-          <div>
-            Right edge: share count of each defender, up to {m.maxShare}.
-          </div>
+          {look.share != "5" && (
+            <div>
+              Right edge: share count of each defender, up to {m.maxShare}.
+            </div>
+          )}
           {look.targets && (
             <div>
               Top edge: {metric.name} of each attacker, up to{" "}
@@ -521,9 +524,11 @@ function LookHeatmap({
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<Hover | null>(null);
 
-  const bars = look.share == "2";
+  const topOnly = look.share == "5";
+  const bars = look.share == "2" || topOnly;
   const strips = look.share == "3";
   const margins = bars || strips;
+  const showRight = margins && !topOnly;
   const showTop = margins && look.targets;
 
   const narrow = width < 480;
@@ -533,7 +538,7 @@ function LookHeatmap({
   const markT = bars ? 28 : strips ? 10 : 0;
   const ML = narrow ? 72 : 96;
   const MB = narrow ? 72 : 90;
-  const MR = 6 + (margins ? GAP + markR + LABEL : 0);
+  const MR = 6 + (showRight ? GAP + markR + LABEL : 0);
   const MT = 6 + (showTop ? GAP + markT + 12 : 0);
   const avail = Math.max(width - ML - MR, 50);
 
@@ -663,7 +668,7 @@ function LookHeatmap({
                   />
                 ) : null,
               )}
-              {marks && (
+              {marks && showRight && (
                 <g
                   transform={`translate(${pw + GAP},0)`}
                   fill="currentColor"
@@ -759,7 +764,7 @@ function LookHeatmap({
                   >
                     {m.attackers[hover.i].name}
                   </text>
-                  {margins && (
+                  {showRight && (
                     <text
                       x={pw + GAP + hoverShareLen + 3}
                       y={(m.nd - 1 - hover.j) * ch + ch / 2}
