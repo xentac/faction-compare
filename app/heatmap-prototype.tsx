@@ -102,10 +102,16 @@ function bandPath(
   cw: number,
   ch: number,
   gap: number,
+  snapEdges = false,
 ): string {
   const parts: string[] = [];
+  // With fractional cells, put every cell edge on a whole device pixel so
+  // neighbouring rows and columns share an edge exactly and leave no seam.
+  const dpr = typeof window == "undefined" ? 1 : window.devicePixelRatio || 1;
+  const edge = (n: number) => (snapEdges ? Math.round(n * dpr) / dpr : n);
   for (let j = j0; j < j1; j++) {
-    const y = r2((j1 - 1 - j) * ch);
+    const y = r2(edge((j1 - 1 - j) * ch));
+    const h = r2(edge((j1 - j) * ch) - edge((j1 - 1 - j) * ch) - gap);
     let i = i0;
     while (i < i1) {
       if (!m.target[j * m.na + i]) {
@@ -116,9 +122,9 @@ function bandPath(
       if (gap == 0) {
         while (e + 1 < i1 && m.target[j * m.na + e + 1]) e++;
       }
-      const x = r2((i - i0) * cw);
-      const w = r2((e - i + 1) * cw - gap);
-      parts.push(`M${x} ${y}h${w}v${r2(ch - gap)}h${-w}z`);
+      const x = r2(edge((i - i0) * cw));
+      const w = r2(edge((e + 1 - i0) * cw) - edge((i - i0) * cw) - gap);
+      parts.push(`M${x} ${y}h${w}v${h}h${-w}z`);
       i = e + 1;
     }
   }
@@ -274,8 +280,8 @@ function AxisHeatmap({
   const stepX = Math.max(Math.ceil(15 / cw), 1);
 
   const path = useMemo(
-    () => bandPath(m, 0, m.na, 0, m.nd, cw, ch, 0),
-    [m, cw, ch],
+    () => bandPath(m, 0, m.na, 0, m.nd, cw, ch, 0, shape == "stretch"),
+    [m, cw, ch, shape],
   );
 
   const onMove = (e: ReactPointerEvent<SVGRectElement>) => {
