@@ -8,7 +8,7 @@
 // independently on the stretched layout settled in issue #4, mounted on the
 // existing Faction Charts tab below the existing charts:
 //
-//   ?colour=A|B|C|D|E   the difficulty colours
+//   ?colour=A|B|C|D|E|F the difficulty colours
 //   ?share=1|2|3|4|5    where the share count is shown
 //   ?reverse=1          flip which end of the ramp is the hard end
 //   ?targets=0          hide each attacker's figures
@@ -82,8 +82,16 @@ const SCHEMES: Scheme[] = [
     name: "Heat, yellow to dark red",
     split: "even",
     light: ["#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026", "#800026"],
-    dark: ["#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026"],
+    dark: ["#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026"],
     note: "several hues; red is the hard end in both themes, so in the dark theme the hard end sits nearest the surface; orange is also the existing Impossible colour",
+  },
+  {
+    key: "F",
+    name: "Heat, 6 steps in the dark theme (as first shown)",
+    split: "even",
+    light: ["#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026", "#800026"],
+    dark: ["#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026"],
+    note: "colour D as first shown: 5 steps in the light theme, 6 in the dark theme, so the step boundaries move when the theme changes",
   },
   {
     key: "E",
