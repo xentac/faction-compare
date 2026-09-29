@@ -169,18 +169,6 @@ function useWidth<T extends HTMLElement>() {
   return [ref, width] as const;
 }
 
-function useIsLarge() {
-  const [large, setLarge] = useState(true);
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setLarge(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
-  return large;
-}
-
 // Snap a cell size down to a whole device pixel so every cell is the same size.
 function snap(size: number): number {
   const dpr = typeof window == "undefined" ? 1 : window.devicePixelRatio || 1;
@@ -248,7 +236,7 @@ interface VariantProps {
 
 // ---------------------------------------------------------------- A and D
 // An svg with names on both axes. "square" sizes cells to the card width;
-// "stretch" fills the card width at the height of the existing charts.
+// "stretch" fills the card width at a fixed 500px height, at every width.
 
 function AxisHeatmap({
   m,
@@ -256,7 +244,6 @@ function AxisHeatmap({
   shape,
 }: VariantProps & { shape: "square" | "stretch" }) {
   const [ref, width] = useWidth<HTMLDivElement>();
-  const large = useIsLarge();
   const [hover, setHover] = useState<Hover | null>(null);
 
   const narrow = width < 480;
@@ -272,7 +259,7 @@ function AxisHeatmap({
     cw = ch = snap(avail / m.na);
   } else {
     cw = avail / m.na;
-    ch = (large ? 500 : 250) / m.nd;
+    ch = 500 / m.nd;
   }
   const pw = cw * m.na;
   const ph = ch * m.nd;
