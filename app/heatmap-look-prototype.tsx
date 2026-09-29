@@ -11,7 +11,8 @@
 //   ?colour=A|B|C|D|E   the difficulty colours
 //   ?share=1|2|3|4      where the share count is shown
 //   ?reverse=1          flip which end of the ramp is the hard end
-//   ?targets=0          hide each attacker's target count
+//   ?targets=0          hide each attacker's figures
+//   ?metric=targets|fair|mean|rivals   which attacker figure the top edge shows
 //   ?cvd=deutan|protan|tritan   simulate colour blindness
 
 import {
@@ -109,12 +110,33 @@ const SHARES = [
 
 const CVDS = ["none", "deutan", "protan", "tritan"];
 
+// Per-attacker figures for "how hard will this attacker have to work".
+const METRICS = [
+  { key: "targets", name: "target count", hint: "taller is more targets" },
+  {
+    key: "fair",
+    name: "fair share of targets",
+    hint: "each target split evenly among the attackers sharing it; taller is more to yourself",
+  },
+  {
+    key: "mean",
+    name: "attackers per target",
+    hint: "average share count of the attacker's targets; taller is more contested",
+  },
+  {
+    key: "rivals",
+    name: "attackers sharing the targets",
+    hint: "attackers with at least one target in common, the attacker included; taller is more contested",
+  },
+];
+
 interface Look {
   colour: string;
   share: string;
   reverse: boolean;
   targets: boolean;
   cvd: string;
+  metric: string;
 }
 
 const DEFAULT_LOOK: Look = {
@@ -123,6 +145,7 @@ const DEFAULT_LOOK: Look = {
   reverse: false,
   targets: true,
   cvd: "none",
+  metric: "targets",
 };
 
 // ---------------------------------------------------------------- model
@@ -136,6 +159,9 @@ interface Model {
   target: Uint8Array;
   shareCount: number[]; // per defender
   targetCount: number[]; // per attacker
+  fairShare: number[]; // per attacker: sum of 1 / share count over targets
+  meanShare: number[]; // per attacker: mean share count over targets
+  sharers: number[]; // per attacker: attackers with a target in common
   maxShare: number;
   maxTargets: number;
   total: number;
@@ -168,6 +194,23 @@ function buildModel(
       }
     }
   }
+  const fairShare = new Array(na).fill(0);
+  const meanShare = new Array(na).fill(0);
+  const sharers = new Array(na).fill(0);
+  for (let i = 0; i < na; i++) {
+    const seen = new Uint8Array(na);
+    for (let j = 0; j < nd; j++) {
+      if (!target[j * na + i]) continue;
+      fairShare[i] += 1 / shareCount[j];
+      meanShare[i] += shareCount[j] / targetCount[i];
+      for (let k = 0; k < na; k++) {
+        if (target[j * na + k] && !seen[k]) {
+          seen[k] = 1;
+          sharers[i]++;
+        }
+      }
+    }
+  }
   return {
     attackers,
     defenders,
@@ -177,6 +220,9 @@ function buildModel(
     target,
     shareCount,
     targetCount,
+    fairShare,
+    meanShare,
+    sharers,
     maxShare: Math.max(1, ...shareCount),
     maxTargets: Math.max(1, ...targetCount),
     total,
@@ -184,6 +230,17 @@ function buildModel(
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+function metricValues(m: Model, metric: string): number[] {
+  if (metric == "fair") return m.fairShare;
+  if (metric == "mean") return m.meanShare;
+  if (metric == "rivals") return m.sharers;
+  return m.targetCount;
+}
+
+function metricText(value: number, metric: string): string {
+  return metric == "fair" || metric == "mean" ? value.toFixed(1) : "" + value;
+}
 
 function devicePixel() {
   const dpr = typeof window == "undefined" ? 1 : window.devicePixelRatio || 1;
@@ -311,7 +368,7 @@ function CellTooltip({
   const ff = m.ff[hover.j * m.na + hover.i];
   const isTarget = m.target[hover.j * m.na + hover.i] == 1;
   const flipX = hover.x > window.innerWidth - 260;
-  const flipY = hover.y > window.innerHeight - 200;
+  const flipY = hover.y > window.innerHeight - 340;
   const color = isTarget
     ? scale.colors[
         stepOf(
@@ -352,13 +409,26 @@ function CellTooltip({
       {row("Attacker estimate", a.bs_estimate_human ?? "none")}
       {row("Defender estimate", d.bs_estimate_human ?? "none")}
       {row("Share count", "" + m.shareCount[hover.j])}
-      {look.targets && row("Attacker's targets", "" + m.targetCount[hover.i])}
+      {look.targets && (
+        <>
+          <div className="border-border/50 mt-1 border-t pt-1 font-medium">
+            {a.name}: {m.targetCount[hover.i]} targets shared by{" "}
+            {m.sharers[hover.i]} attackers
+          </div>
+          {row("Target count", "" + m.targetCount[hover.i])}
+          {row("Fair share of targets", m.fairShare[hover.i].toFixed(1))}
+          {row("Attackers per target", m.meanShare[hover.i].toFixed(1))}
+          {row("Attackers sharing them", "" + m.sharers[hover.i])}
+        </>
+      )}
     </div>
   );
 }
 
 function Legend({ m, scale, look }: { m: Model; scale: Scale; look: Look }) {
   const n = scale.colors.length;
+  const metric = METRICS.find((x) => x.key == look.metric)!;
+  const metricMax = Math.max(...metricValues(m, look.metric), 0);
   const easyAt =
     scale.scheme.split == "easy"
       ? 50
@@ -422,7 +492,8 @@ function Legend({ m, scale, look }: { m: Model; scale: Scale; look: Look }) {
           </div>
           {look.targets && (
             <div>
-              Top edge: target count of each attacker, up to {m.maxTargets}.
+              Top edge: {metric.name} of each attacker, up to{" "}
+              {metricText(metricMax, look.metric)} ({metric.hint}).
             </div>
           )}
         </div>
@@ -497,8 +568,11 @@ function LookHeatmap({
     return classPaths(m, cls, steps * 3, cw, ch);
   }, [m, cw, ch, steps, fade, scale.scheme, scale.minFF, scale.easyFF, scale.maxFF]);
 
-  // margin marks: share count per defender on the right, target count per
-  // attacker along the top
+  const values = metricValues(m, look.metric);
+  const valueMax = Math.max(...values, 1e-9);
+
+  // margin marks: share count per defender on the right, the chosen attacker
+  // figure along the top
   const marks = useMemo(() => {
     if (!margins) return null;
     const edge = devicePixel();
@@ -516,18 +590,18 @@ function LookHeatmap({
       right[k] += `M0 ${y}h${len}v${h}h${-len}z`;
     }
     for (let i = 0; i < m.na; i++) {
-      const count = m.targetCount[i];
-      if (count == 0) continue;
+      if (m.targetCount[i] == 0) continue;
       const x = r2(edge(i * cw));
       const w = r2(edge((i + 1) * cw) - edge(i * cw));
-      const len = bars
-        ? r2(Math.max((count / m.maxTargets) * markT, 1))
-        : markT;
-      const k = bars ? 0 : level(count, m.maxTargets);
+      const part = values[i] / valueMax;
+      const len = bars ? r2(Math.max(part * markT, 1)) : markT;
+      const k = bars
+        ? 0
+        : Math.min(Math.floor(part * STRIP_STEPS), STRIP_STEPS - 1);
       top[k] += `M${x} 0h${w}v${-len}h${-w}z`;
     }
     return { right, top };
-  }, [m, margins, bars, cw, ch, markR, markT]);
+  }, [m, margins, bars, cw, ch, markR, markT, values, valueMax]);
 
   const onMove = (e: ReactPointerEvent<SVGRectElement>) => {
     const { c, r } = cellAt(e, m.na, m.nd);
@@ -557,9 +631,7 @@ function LookHeatmap({
       ? (m.shareCount[hover.j] / m.maxShare) * markR
       : markR;
   const hoverTargetLen =
-    hover && bars
-      ? (m.targetCount[hover.i] / m.maxTargets) * markT
-      : markT;
+    hover && bars ? (values[hover.i] / valueMax) * markT : markT;
 
   return (
     <div ref={ref} className="w-full">
@@ -707,7 +779,7 @@ function LookHeatmap({
                       textAnchor="middle"
                       className="font-mono"
                     >
-                      {m.targetCount[hover.i]}
+                      {metricText(values[hover.i], look.metric)}
                     </text>
                   )}
                 </g>
@@ -737,6 +809,7 @@ function LookHeatmap({
           `${steps} difficulty steps`,
           `share count 0 to ${m.maxShare}`,
           `target count 0 to ${m.maxTargets}`,
+          `top edge: ${look.metric}`,
         ]}
       />
     </div>
@@ -764,6 +837,9 @@ function useLook() {
       reverse: p.get("reverse") == "1",
       targets: p.get("targets") != "0",
       cvd: cvd && CVDS.includes(cvd) ? cvd : "none",
+      metric:
+        METRICS.find((x) => x.key == p.get("metric"))?.key ??
+        DEFAULT_LOOK.metric,
     });
   }, []);
   const setLook = (next: Look) => {
@@ -774,6 +850,7 @@ function useLook() {
     url.searchParams.set("reverse", next.reverse ? "1" : "0");
     url.searchParams.set("targets", next.targets ? "1" : "0");
     url.searchParams.set("cvd", next.cvd);
+    url.searchParams.set("metric", next.metric);
     window.history.replaceState(null, "", url);
   };
   return [look, setLook] as const;
@@ -801,6 +878,9 @@ function PrototypeSwitcher({
       cvd: CVDS[(CVDS.indexOf(look.cvd) + 1) % CVDS.length],
     });
 
+  const metric = () =>
+    onChange({ ...look, metric: cycle(METRICS, look.metric, 1) });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -810,6 +890,7 @@ function PrototypeSwitcher({
       if (e.key == "r") onChange({ ...look, reverse: !look.reverse });
       if (e.key == "t") onChange({ ...look, targets: !look.targets });
       if (e.key == "c") cvd();
+      if (e.key == "m") metric();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -856,7 +937,10 @@ function PrototypeSwitcher({
           className={toggle(look.targets)}
           onClick={() => onChange({ ...look, targets: !look.targets })}
         >
-          t: target counts
+          t: attacker figures
+        </button>
+        <button className={toggle(false)} onClick={metric}>
+          m: top edge {look.metric}
         </button>
         <button className={toggle(look.cvd != "none")} onClick={cvd}>
           c: {look.cvd == "none" ? "full colour" : look.cvd}
