@@ -57,6 +57,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ChevronsUpDown } from "lucide-react";
+import { HeatmapPrototype } from "./heatmap-prototype";
 
 enum ChartType {
   attack,
@@ -607,6 +608,23 @@ export function MyChart({
               />
             </CardContent>
           </Card>
+          {/* PROTOTYPE: heatmap layout variants, ?variant=A|B|C|D */}
+          <HeatmapPrototype
+            left={left_data}
+            right={right_data}
+            leftName={leftfactionbasic.name}
+            rightName={rightfactionbasic.name}
+            minFF={minimumFFTarget}
+            maxFF={possibleFFMax}
+            onSelectLeft={handleFactionTableClick(
+              setLeftSelected,
+              setLeftNameSelected,
+            )}
+            onSelectRight={handleFactionTableClick(
+              setRightSelected,
+              setRightNameSelected,
+            )}
+          />
         </TabsContent>
         <TabsContent
           value="faction_data"

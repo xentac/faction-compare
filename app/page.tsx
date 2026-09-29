@@ -13,6 +13,7 @@ import { MyChart } from "./chart";
 import { Button } from "@/components/ui/button";
 import { FactionInputForm } from "./faction-input-form";
 import { FactionWarInputForm } from "./faction-war-input-form";
+import { fakeFactions } from "./prototype-fake-data";
 
 const getKeys = (): keys | undefined => {
   // We need this because window / localstorage might not exist as fast yet (for the first mount)
@@ -92,7 +93,19 @@ export default function SPA() {
 
   //we need this because it should run after each time the component updates, or in this case, when window gets mounted.
   //thats the cleanest way of doing things i think
+  // PROTOTYPE: ?fake=100x100 loads synthetic factions and skips login
+  const [fake, setFake] = useState(false);
   useEffect(() => {
+    const spec = new URLSearchParams(window.location.search).get("fake");
+    if (spec != null) {
+      const f = fakeFactions(spec);
+      setLeftFactionBasic(f.left.basic);
+      setRightFactionBasic(f.right.basic);
+      setLeftFFScouterData(f.left.scouter);
+      setRightFFScouterData(f.right.scouter);
+      setFake(true);
+      return;
+    }
     setKeys(getKeys());
     setFactionIds(getFactionIds());
   }, []);
@@ -239,6 +252,23 @@ export default function SPA() {
         reset();
       }); // TODO: Tell them something
   }, [keys, rightFactionBasic, reset]);
+
+  if (fake && leftFactionBasic && rightFactionBasic) {
+    return (
+      <>
+        <div className="mt-5 mx-5 rounded-md border border-dashed p-2 text-sm">
+          PROTOTYPE: synthetic factions, not real data. Remove ?fake from the
+          URL to use real factions.
+        </div>
+        <MyChart
+          leftffscouterdata={leftFFScouterData ?? []}
+          rightffscouterdata={rightFFScouterData ?? []}
+          leftfactionbasic={leftFactionBasic}
+          rightfactionbasic={rightFactionBasic}
+        />
+      </>
+    );
+  }
 
   if (!keys) {
     return (
