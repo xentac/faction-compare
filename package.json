@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "prototype:heatmap": "next dev --turbopack -p 3210",
+    "prototype:time-to-hits": "next dev --turbopack -p 3211",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

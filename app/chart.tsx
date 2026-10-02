@@ -57,7 +57,12 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ChevronsUpDown } from "lucide-react";
-import { HeatmapLookPrototype } from "./heatmap-look-prototype";
+import {
+  ConfigFields,
+  TimeToHitsPrototype,
+  timeToHitsColumn,
+  useTimeToHitsPrototype,
+} from "./time-to-hits-prototype";
 
 enum ChartType {
   attack,
@@ -400,6 +405,14 @@ export function MyChart({
     ],
   );
 
+  // PROTOTYPE: time-to-hits estimate display (issue #9)
+  const tth = useTimeToHitsPrototype(
+    left_data,
+    right_data,
+    minimumFFTarget,
+    possibleFFMax,
+  );
+
   function InnerMemberChartContainer({
     data,
     name,
@@ -490,6 +503,7 @@ export function MyChart({
                         setEasyFFMax(values.easy_ff_max || 2.5);
                         setPossibleFFMax(values.possible_ff_max || 4.0);
                         setMinimumFFTarget(values.minimum_ff_target || 1.75);
+                        tth.commitDraft();
                       },
                     )}
                     className="space-y-8"
@@ -534,6 +548,7 @@ export function MyChart({
                           </FormItem>
                         )}
                       />
+                      <ConfigFields tth={tth} />
                     </div>
                     <Button type="submit">Submit</Button>
                   </form>
@@ -608,15 +623,12 @@ export function MyChart({
               />
             </CardContent>
           </Card>
-          {/* PROTOTYPE: heatmap difficulty colours and share count display,
-              ?colour=A|B|C|D|E and ?share=1|2|3|4 */}
-          <HeatmapLookPrototype
-            left={left_data}
-            right={right_data}
+          {/* PROTOTYPE: time-to-hits estimate display, ?tth=A|B|C */}
+          <TimeToHitsPrototype
+            tth={tth}
             leftName={leftfactionbasic.name}
             rightName={rightfactionbasic.name}
             minFF={minimumFFTarget}
-            easyFF={easyFFMax}
             maxFF={possibleFFMax}
             onSelectLeft={handleFactionTableClick(
               setLeftSelected,
@@ -639,7 +651,7 @@ export function MyChart({
             <CardContent>
               Total: {left_data.length}
               <DataTable
-                columns={FactionColumns}
+                columns={[...FactionColumns, ...timeToHitsColumn(tth, "left")]}
                 data={left_data}
                 onClick={handleFactionTableClick(
                   setLeftSelected,
@@ -655,7 +667,7 @@ export function MyChart({
             <CardContent>
               Total: {right_data.length}
               <DataTable
-                columns={FactionColumns}
+                columns={[...FactionColumns, ...timeToHitsColumn(tth, "right")]}
                 data={right_data}
                 onClick={handleFactionTableClick(
                   setRightSelected,
