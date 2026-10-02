@@ -71,7 +71,7 @@ export interface Look {
 }
 
 const DEFAULT_LOOK: Look = {
-  tth: "A",
+  tth: "B",
   edge: "replace",
   band: true,
   fmt: "hm",
@@ -168,9 +168,10 @@ function buildModel(
 
 interface Direction {
   m: Model;
-  est: Estimate[]; // per attacker, aligned with m.attackers
+  est: Estimate[]; // per attacker, aligned with m.attackers; the chosen mode
+  med: Estimate[]; // the same with every defender medding out
   byId: Map<number, Estimate>;
-  maxTime: number; // largest p90 among timed attackers
+  maxTime: number; // largest p90 among timed attackers, either mode
   simMs: number;
 }
 
@@ -183,22 +184,32 @@ function buildDirection(
   medOut: boolean,
 ): Direction {
   const m = buildModel(attackers, defenders, minFF, maxFF);
-  const r = simulate(
-    {
-      na: m.na,
-      nd: m.nd,
-      target: m.target,
-      hasEstimate: attackers.map((a) => a.bss_public != null),
-    },
-    { goal, medOut },
-  );
+  const input = {
+    na: m.na,
+    nd: m.nd,
+    target: m.target,
+    hasEstimate: attackers.map((a) => a.bss_public != null),
+  };
+  const plain = simulate(input, { goal, medOut: false });
+  const med = simulate(input, { goal, medOut: true });
+  const est = medOut ? med.estimates : plain.estimates;
   const byId = new Map<number, Estimate>();
   let maxTime = 0;
-  r.estimates.forEach((e, i) => {
+  est.forEach((e, i) => {
     byId.set(attackers[i].id, e);
     if (e.kind == "time") maxTime = Math.max(maxTime, e.p90);
   });
-  return { m, est: r.estimates, byId, maxTime: Math.max(maxTime, 1), simMs: r.ms };
+  med.estimates.forEach((e) => {
+    if (e.kind == "time") maxTime = Math.max(maxTime, e.p90);
+  });
+  return {
+    m,
+    est: plain.estimates,
+    med: med.estimates,
+    byId,
+    maxTime: Math.max(maxTime, 1),
+    simMs: plain.ms + med.ms,
+  };
 }
 
 // ---------------------------------------------------------------- hook
@@ -527,10 +538,14 @@ function CellRows({
       {row("Fair fight", Number.isNaN(ff) ? "unknown" : ff.toFixed(2))}
       {row("Attacker estimate", a.bs_estimate_human ?? "none")}
       {row("Defender estimate", def.bs_estimate_human ?? "none")}
-      <div className="border-border/50 mt-1 border-t pt-1">
+      <div className="border-border/50 mt-1 grid gap-1.5 border-t pt-1">
         {row(
           `Time to ${tth.goal} hits`,
           estimateText(d.est[cell.i], tth.look.fmt, true),
+        )}
+        {row(
+          "if defenders med out",
+          estimateText(d.med[cell.i], tth.look.fmt, true),
         )}
       </div>
     </>
@@ -717,7 +732,7 @@ function Heatmap({
         const len = r2(Math.max((m.targetCount[i] / m.maxTargets) * markT, 1));
         targets += `M${x} 0h${w}v${-len}h${-w}z`;
       }
-      const e = d.est[i];
+      const e = (tth.medOut ? d.med : d.est)[i];
       if (e.kind == "time") {
         median += `M${x} 0h${w}v${-scaleT(e.p50)}h${-w}z`;
         const lo = scaleT(e.p10);
@@ -728,7 +743,7 @@ function Heatmap({
       }
     }
     return { right, targets, median, band, never };
-  }, [m, d, cw, ch, markR, markT]);
+  }, [m, d, cw, ch, markR, markT, tth.medOut]);
 
   const onMove = (e: ReactPointerEvent<SVGRectElement>) => {
     const c = cellAt(e, m.na, m.nd);
@@ -779,7 +794,7 @@ function Heatmap({
       show(targetRowY - len - 3, "" + m.targetCount[i], "t");
     }
     if (timeOnTop) {
-      const e = d.est[i];
+      const e = (tth.medOut ? d.med : d.est)[i];
       const len =
         e.kind == "time"
           ? (e.p90 / d.maxTime) * markT
@@ -1056,7 +1071,6 @@ function PinnedPanel({
 // ---------------------------------------------------------------- variant B
 
 const ROW_H = 14;
-const LIST_H = 500;
 
 function RankedChart({
   d,
@@ -1072,28 +1086,16 @@ function RankedChart({
   const [hover, setHover] = useState<number | null>(null);
   const fmt = tth.look.fmt;
 
-  // never first, then timed by median descending, then blank
-  const order = useMemo(() => {
-    const idx = m.attackers.map((_, i) => i);
-    const rank = (i: number) => {
-      const e = d.est[i];
-      return e.kind == "never" ? 2 : e.kind == "time" ? 1 : 0;
-    };
-    idx.sort((a, b) => {
-      const ra = rank(a);
-      const rb = rank(b);
-      if (ra != rb) return rb - ra;
-      const ea = d.est[a];
-      const eb = d.est[b];
-      if (ea.kind == "time" && eb.kind == "time") return eb.p50 - ea.p50;
-      return a - b;
-    });
-    return idx;
-  }, [m, d]);
+  // the heatmap's attacker axis, strongest first; members with no battle
+  // score estimate come last, as on the axis
+  const order = useMemo(
+    () => m.attackers.map((_, i) => i).reverse(),
+    [m],
+  );
 
   const narrow = width < 480;
   const ML = narrow ? 80 : 110;
-  const MR = narrow ? 56 : 72; // room for the figure beside the longest whisker
+  const MR = narrow ? 56 : 72; // the hovered figure may run past this
   const MT = 18;
   const pw = Math.max(width - ML - MR, 50);
   const x = (min: number) => (min / d.maxTime) * pw;
@@ -1110,24 +1112,20 @@ function RankedChart({
       <div
         className="text-muted-foreground mb-2 text-[11px]"
       >
-        Each attacker&apos;s waiting time to reach {tth.goal} hits, most
-        squeezed first. Dot: median; {tth.look.band ? "line: 10th-90th band; " : ""}
-        hospital stays of 15-30 min, defenders{" "}
-        {tth.medOut ? "med out" : "serve their stay"}.
+        Each attacker&apos;s waiting time to reach {tth.goal} hits, strongest
+        attacker first. Filled dot: defenders serve their 15-30 min stay.
+        Hollow dot: every defender meds out.
+        {tth.look.band ? " Lines: 10th-90th band." : ""}
       </div>
       {width > 0 && (
-        <div
-          className="overflow-y-auto"
-          style={{ maxHeight: LIST_H }}
-          onPointerLeave={() => setHover(null)}
-        >
+        <div onPointerLeave={() => setHover(null)}>
           <svg
             width={width}
             height={height}
             className="text-muted-foreground block select-none"
             style={{ fontSize: narrow ? 9 : 10 }}
           >
-            <g transform={`translate(${ML},0)`}>
+            <g transform={`translate(${ML},0)`} fill="currentColor">
               <g stroke="currentColor" strokeOpacity={0.18}>
                 {ticks.map((t) => (
                   <line key={t} x1={x(t)} x2={x(t)} y1={MT} y2={height} />
@@ -1142,6 +1140,7 @@ function RankedChart({
               </g>
               {order.map((i, r) => {
                 const e = d.est[i];
+                const me = d.med[i];
                 const a = m.attackers[i];
                 const cy = MT + r * ROW_H + ROW_H / 2;
                 const hot = hover == i;
@@ -1189,18 +1188,44 @@ function RankedChart({
                           r={3}
                           className="fill-foreground"
                         />
-                        {hot && (
-                          <text
-                            x={x(tth.look.band ? e.p90 : e.p50) + 6}
-                            y={cy}
-                            dominantBaseline="central"
-                            className="fill-foreground font-mono"
-                            fontWeight={700}
-                          >
-                            {estimateText(e, fmt, tth.look.band)}
-                          </text>
-                        )}
                       </>
+                    )}
+                    {me.kind == "time" && (
+                      <>
+                        {tth.look.band && (
+                          <line
+                            x1={x(me.p10)}
+                            x2={x(me.p90)}
+                            y1={cy}
+                            y2={cy}
+                            stroke="currentColor"
+                            strokeOpacity={0.6}
+                            strokeWidth={2}
+                          />
+                        )}
+                        <circle
+                          cx={x(me.p50)}
+                          cy={cy}
+                          r={2.5}
+                          fill="var(--card)"
+                          className="stroke-foreground"
+                          strokeWidth={1.5}
+                        />
+                      </>
+                    )}
+                    {hot && e.kind == "time" && (
+                      <text
+                        x={x(tth.look.band ? e.p90 : e.p50) + 6}
+                        y={cy}
+                        dominantBaseline="central"
+                        className="fill-foreground font-mono"
+                        fontWeight={700}
+                      >
+                        {estimateText(e, fmt, tth.look.band)}
+                        {me.kind == "time"
+                          ? ` · med out ${estimateText(me, fmt, tth.look.band)}`
+                          : ""}
+                      </text>
                     )}
                     {e.kind == "never" && (
                       <text
@@ -1237,7 +1262,7 @@ function RankedChart({
           `${d.est.filter((e) => e.kind == "never").length} never`,
           `${d.est.filter((e) => e.kind == "blank").length} blank`,
           `longest band ${fmtMinutes(d.maxTime, fmt)}`,
-          `${height > LIST_H ? "scrolls" : "fits"}`,
+          `${height} px tall`,
         ]}
       />
     </div>
