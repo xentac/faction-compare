@@ -139,3 +139,187 @@ export function buildDirection({
   );
   return { targetRange, attackers, defenders, cells };
 }
+
+// The time-to-hits estimate: how long each attacker of a direction waits for
+// targets before reaching the hit goal. A discrete-event simulation of a
+// termed war in which every attacker competes for the shared targets from
+// t = 0. Only waiting for targets is measured: hits are instant.
+
+// One attacker's waiting time in one case, in minutes.
+export type WaitEstimate =
+  // The median over the runs, with the 10th and 90th percentiles.
+  | { kind: "time"; p10: number; median: number; p90: number }
+  // The attacker has no targets.
+  | { kind: "never" }
+  // The attacker has no battle score estimate.
+  | { kind: "none" };
+
+export interface AttackerTimeToHits {
+  // The case where every defender serves their full hospital stay.
+  fullStays: WaitEstimate;
+}
+
+export interface TimeToHits {
+  hitGoal: number;
+  // One entry per attacker, in the order of the direction's attacker axis.
+  attackers: AttackerTimeToHits[];
+}
+
+export const ESTIMATE_RUNS = 200;
+const ESTIMATE_SEED = 20250929;
+// A hospital stay after a hit, in minutes.
+const STAY_MINIMUM = 15;
+const STAY_MAXIMUM = 30;
+
+// A random number in [0, 1); the same seed gives the same sequence.
+type Random = () => number;
+
+function seededRandom(seed: number): Random {
+  let state = seed;
+  return () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// How defenders behave once hit. A case is started afresh for each run and
+// answers how long the defender at the given axis index, hit at the given
+// time, stays in hospital.
+type HospitalCase = (
+  defenderCount: number,
+) => (defender: number, time: number, random: Random) => number;
+
+const fullStays: HospitalCase = () => (_defender, _time, random) =>
+  STAY_MINIMUM + random() * (STAY_MAXIMUM - STAY_MINIMUM);
+
+// One run of the war. Fills `reached` with the time of each attacker's
+// goal-reaching hit; an attacker with no targets is left untouched.
+function runWar(
+  // Per defender, the attackers they are a target for.
+  contenders: number[][],
+  attackerCount: number,
+  hitGoal: number,
+  stayAfterHit: ReturnType<HospitalCase>,
+  random: Random,
+  reached: Float64Array,
+) {
+  const hitsLeft = new Int32Array(attackerCount).fill(hitGoal);
+  // Every defender is out of hospital at t = 0. Infinity marks a defender
+  // nobody wants any more.
+  const releaseAt = new Float64Array(contenders.length);
+  const live: number[] = [];
+  for (;;) {
+    // The next release. Among simultaneous releases the defender earliest on
+    // the axis goes first, which keeps a run deterministic.
+    let defender = -1;
+    let time = Infinity;
+    for (let d = 0; d < releaseAt.length; d++) {
+      if (releaseAt[d] < time) {
+        time = releaseAt[d];
+        defender = d;
+      }
+    }
+    if (defender < 0) {
+      return;
+    }
+    live.length = 0;
+    for (const attacker of contenders[defender]) {
+      if (hitsLeft[attacker] > 0) {
+        live.push(attacker);
+      }
+    }
+    if (live.length === 0) {
+      // Attackers only ever leave, so nobody will want this defender again.
+      releaseAt[defender] = Infinity;
+      continue;
+    }
+    // One contender at random gets the hit; the others lose nothing.
+    const winner = live[Math.floor(random() * live.length)];
+    if (--hitsLeft[winner] === 0) {
+      reached[winner] = time;
+    }
+    releaseAt[defender] = time + stayAfterHit(defender, time, random);
+  }
+}
+
+// Every attacker's estimate in one case.
+function estimateCase(
+  direction: Direction,
+  hitGoal: number,
+  hospitalCase: HospitalCase,
+): WaitEstimate[] {
+  const { attackers, defenders, cells } = direction;
+  const contenders = defenders.map((_, d) =>
+    attackers.flatMap((_, a) => (cells[a][d].isTarget ? [a] : [])),
+  );
+  const random = seededRandom(ESTIMATE_SEED);
+  const samples = attackers.map(() => new Float64Array(ESTIMATE_RUNS));
+  const reached = new Float64Array(attackers.length);
+  for (let run = 0; run < ESTIMATE_RUNS; run++) {
+    runWar(
+      contenders,
+      attackers.length,
+      hitGoal,
+      hospitalCase(defenders.length),
+      random,
+      reached,
+    );
+    for (let a = 0; a < attackers.length; a++) {
+      samples[a][run] = reached[a];
+    }
+  }
+  return attackers.map((attacker, a) => {
+    if (attacker.estimate == null) {
+      return { kind: "none" };
+    }
+    if (attacker.targetCount === 0) {
+      return { kind: "never" };
+    }
+    const sorted = samples[a].sort();
+    const percentile = (p: number) =>
+      sorted[Math.min(Math.floor(p * ESTIMATE_RUNS), ESTIMATE_RUNS - 1)];
+    return {
+      kind: "time",
+      p10: percentile(0.1),
+      median: percentile(0.5),
+      p90: percentile(0.9),
+    };
+  });
+}
+
+// The time-to-hits estimate of one direction. The same direction and hit goal
+// always give the same numbers. Takes about half a second at 100 by 100, so
+// callers keep it off the render path.
+export function estimateTimeToHits(
+  direction: Direction,
+  hitGoal: number,
+): TimeToHits {
+  // Each case draws from its own sequence, so one case's numbers do not
+  // depend on which other cases are computed.
+  const goal = Math.max(1, Math.floor(hitGoal));
+  const full = estimateCase(direction, goal, fullStays);
+  return {
+    hitGoal,
+    attackers: direction.attackers.map((_, a) => ({ fullStays: full[a] })),
+  };
+}
+
+// A length of time in minutes as it is written on the page: "45m", "5h 20m",
+// "5h", "1d 3h". From a day up it is given to the nearest hour.
+export function formatDuration(minutes: number): string {
+  const whole = Math.round(minutes);
+  if (whole < 60) {
+    return `${whole}m`;
+  }
+  if (whole < 24 * 60) {
+    const hours = Math.floor(whole / 60);
+    const rest = whole % 60;
+    return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+  }
+  const hours = Math.round(whole / 60);
+  const days = Math.floor(hours / 24);
+  const rest = hours % 24;
+  return rest === 0 ? `${days}d` : `${days}d ${rest}h`;
+}
