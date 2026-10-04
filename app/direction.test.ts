@@ -372,12 +372,14 @@ describe("time-to-hits estimate", () => {
   });
 
   test("the 10th percentile, the median and the 90th percentile are in order", () => {
-    for (const { fullStays } of estimateTimeToHits(contested, 5).attackers) {
-      if (fullStays.kind !== "time") {
-        throw new Error("expected a time");
+    for (const attacker of estimateTimeToHits(contested, 5).attackers) {
+      for (const wait of [attacker.fullStays, attacker.medOut]) {
+        if (wait.kind !== "time") {
+          throw new Error("expected a time");
+        }
+        expect(wait.p10).toBeLessThanOrEqual(wait.median);
+        expect(wait.median).toBeLessThanOrEqual(wait.p90);
       }
-      expect(fullStays.p10).toBeLessThanOrEqual(fullStays.median);
-      expect(fullStays.median).toBeLessThanOrEqual(fullStays.p90);
     }
   });
 
@@ -385,5 +387,87 @@ describe("time-to-hits estimate", () => {
     expect(estimateTimeToHits(contested, 5)).toEqual(
       estimateTimeToHits(contested, 5),
     );
+  });
+
+  // One attacker against one defender hit over and over: Alice and the single
+  // target Three (3.0). The first hit lands at t = 0.
+  const oneOnOne = direction(
+    alice,
+    faction("Theirs", [{ id: 11, name: "Three", estimate: 750 }]),
+  );
+
+  // The named attacker's estimate when every defender meds out.
+  function medOutWaitOf(d: Direction, hitGoal: number, name: string) {
+    const a = d.attackers.findIndex((m) => m.name === name);
+    const wait = estimateTimeToHits(d, hitGoal).attackers[a].medOut;
+    if (wait.kind !== "time") {
+      throw new Error("expected a time");
+    }
+    return wait;
+  }
+
+  test("a defender who meds out is back after a reaction delay of 1 to 5 minutes", () => {
+    // A goal of 5 takes four releases.
+    const wait = medOutWaitOf(oneOnOne, 5, "Alice");
+    expect(wait.p10).toBeGreaterThanOrEqual(4 * 1);
+    expect(wait.p90).toBeLessThanOrEqual(4 * 5);
+    expect(wait.p90).toBeGreaterThan(wait.p10);
+  });
+
+  // Each med out adds 10 minutes of medical cooldown and the 1 to 5 minutes
+  // to the next hit take 1 to 5 off, so the cooldown climbs 5 to 9 minutes a
+  // hit: the 6 hour cap stops a med out somewhere from the 40th hit to the
+  // 72nd, around the 52nd.
+
+  test("a defender hit repeatedly meds out every time until the medical cooldown cap", () => {
+    // The first 39 hits are always under the cap.
+    const wait = medOutWaitOf(oneOnOne, 40, "Alice");
+    expect(wait.p90).toBeLessThanOrEqual(39 * 5);
+  });
+
+  test("a defender at the medical cooldown cap serves full stays", () => {
+    // Without the cap 61 releases take at most 305 minutes. With it, about
+    // ten of them are full stays of 15 to 30 minutes: about 380 minutes.
+    const wait = medOutWaitOf(oneOnOne, 62, "Alice");
+    expect(wait.median).toBeGreaterThan(330);
+  });
+
+  test("a defender whose medical cooldown has decayed to under 30 minutes meds out again", () => {
+    // From the cap the cooldown needs some 330 minutes of full stays, about
+    // 15 hits, so by the 72nd hit the defender is back to medding out, and
+    // the next 38 releases take at most 5 minutes each. Full stays would
+    // take at least 15 each.
+    const before = medOutWaitOf(oneOnOne, 72, "Alice");
+    const after = medOutWaitOf(oneOnOne, 110, "Alice");
+    expect(after.median - before.median).toBeLessThanOrEqual(38 * 5);
+  });
+
+  test("the med-out case is never slower than full stays", () => {
+    for (const hitGoal of [5, 60]) {
+      const { attackers } = estimateTimeToHits(contested, hitGoal);
+      for (const { fullStays, medOut } of attackers) {
+        if (fullStays.kind !== "time" || medOut.kind !== "time") {
+          throw new Error("expected times");
+        }
+        expect(medOut.p10).toBeLessThanOrEqual(fullStays.p10);
+        expect(medOut.median).toBeLessThanOrEqual(fullStays.median);
+        expect(medOut.p90).toBeLessThanOrEqual(fullStays.p90);
+      }
+    }
+  });
+
+  test("an attacker with no targets or no estimate has the same answer in both cases", () => {
+    const ours = faction("Ours", [
+      { id: 1, name: "Alice", estimate: 1000 },
+      { id: 2, name: "Unscouted", estimate: null },
+      { id: 3, name: "Weak", estimate: 10 },
+    ]);
+    const d = direction(ours, threeTargets);
+    const byName = (name: string) =>
+      estimateTimeToHits(d, 20).attackers[
+        d.attackers.findIndex((m) => m.name === name)
+      ];
+    expect(byName("Unscouted").medOut).toEqual({ kind: "none" });
+    expect(byName("Weak").medOut).toEqual({ kind: "never" });
   });
 });
