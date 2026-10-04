@@ -26,14 +26,12 @@ import {
 import {
   DrillDownData,
   TornFactionBasicApi,
-  FairFightScore,
   FFScouterResult,
   GraphData,
-  TornMemberApi,
-  FFScouterJson,
   FactionColumns,
   MemberColumns,
 } from "./types";
+import { buildFactionData } from "./faction-data";
 import { CategoricalChartState } from "recharts/types/chart/types";
 import { DataTable } from "./data-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -242,152 +240,14 @@ export function MyChart({
     });
   }
 
-  function massage_data(
-    leftffscouterdata: FFScouterResult,
-    rightffscouterdata: FFScouterResult,
-    leftfactiondata: TornFactionBasicApi,
-    rightfactiondata: TornFactionBasicApi,
-    easyFFMax: number,
-    possibleFFMax: number,
-  ): { left_data: GraphData[]; right_data: GraphData[] } {
-    const sort_function = (a: FFScouterJson, b: FFScouterJson) => {
-      if (a.bss_public == null && b.bss_public == null) {
-        return 0;
-      }
-      if (a.bss_public == null) {
-        return -1;
-      }
-      if (b.bss_public == null) {
-        return 1;
-      }
-      return a.bss_public - b.bss_public;
-    };
-    // factions sorted by lower BSS to highest
-    const sorted_left: FFScouterJson[] =
-      leftffscouterdata.toSorted(sort_function);
-    const sorted_right: FFScouterJson[] =
-      rightffscouterdata.toSorted(sort_function);
-
-    const map_data = (
-      primaryfaction: TornFactionBasicApi,
-      opponentfaction: TornFactionBasicApi,
-      opponent: FFScouterResult,
-    ) => {
-      let member_number = 0;
-      return (value: FFScouterJson): GraphData => {
-        member_number++;
-        const member: TornMemberApi =
-          primaryfaction.members["" + value.player_id];
-        const opponent_scores = opponent.map(
-          (enemy) =>
-            new FairFightScore(
-              opponentfaction.members["" + enemy.player_id].name,
-              "" + enemy.player_id,
-              value.bss_public,
-              enemy.bss_public,
-              enemy.bs_estimate_human,
-            ),
-        );
-        const lists = {
-          easy_attacks: opponent_scores.filter(
-            (value) =>
-              value.attacker_ff != null && value.attacker_ff <= easyFFMax,
-          ),
-          possible_attacks: opponent_scores.filter(
-            (value) =>
-              value.attacker_ff != null &&
-              value.attacker_ff <= possibleFFMax &&
-              value.attacker_ff > easyFFMax,
-          ),
-          hard_attacks: opponent_scores.filter(
-            (value) =>
-              value.attacker_ff != null && value.attacker_ff > possibleFFMax,
-          ),
-          easy_defends: opponent_scores.filter(
-            (value) =>
-              value.defender_ff != null && value.defender_ff >= possibleFFMax,
-          ),
-          possible_defends: opponent_scores.filter(
-            (value) =>
-              value.defender_ff != null &&
-              value.defender_ff < possibleFFMax &&
-              value.defender_ff >= easyFFMax,
-          ),
-          hard_defends: opponent_scores.filter(
-            (value) =>
-              value.defender_ff != null && value.defender_ff < easyFFMax,
-          ),
-          targets_attacks: opponent_scores.filter(
-            (value) =>
-              value.attacker_ff != null &&
-              value.attacker_ff >= minimumFFTarget &&
-              value.attacker_ff < possibleFFMax,
-          ),
-          targets_defends: opponent_scores.filter(
-            (value) =>
-              value.defender_ff != null &&
-              value.defender_ff >= minimumFFTarget &&
-              value.defender_ff < possibleFFMax,
-          ),
-        };
-        return {
-          name: member?.name ?? "Unknown",
-          number: member_number,
-          id: value.player_id,
-          bs_estimate_human: value.bs_estimate_human,
-          opponent_scores: opponent_scores,
-          bss_public: value.bss_public,
-          easy_attacks: lists.easy_attacks,
-          easy_attacks_count: lists.easy_attacks.length,
-          possible_attacks: lists.possible_attacks,
-          possible_attacks_count: lists.possible_attacks.length,
-          hard_attacks: lists.hard_attacks,
-          hard_attacks_count: lists.hard_attacks.length,
-          easy_defends: lists.easy_defends,
-          easy_defends_count: lists.easy_defends.length,
-          possible_defends: lists.possible_defends,
-          possible_defends_count: lists.possible_defends.length,
-          hard_defends: lists.hard_defends,
-          hard_defends_count: lists.hard_defends.length,
-          targets_attacks: lists.targets_attacks,
-          targets_attacks_count: lists.targets_attacks.length,
-          targets_defends: lists.targets_defends,
-          targets_defends_count: lists.targets_defends.length,
-        };
-      };
-    };
-
-    const no_unavailable = (faction: TornFactionBasicApi) => {
-      return (item: FFScouterJson) => {
-        const member = faction.members["" + item.player_id];
-        return (
-          member.status.state != "Fallen" && member.status.state != "Federal"
-        );
-      };
-    };
-
-    const left_data: GraphData[] = sorted_left
-      .filter(no_unavailable(leftfactiondata))
-      .map(map_data(leftfactiondata, rightfactiondata, sorted_right));
-    const right_data: GraphData[] = sorted_right
-      .filter(no_unavailable(rightfactiondata))
-      .map(map_data(rightfactiondata, leftfactiondata, sorted_left));
-
-    console.log(left_data);
-    console.log(right_data);
-
-    return { left_data: left_data, right_data: right_data };
-  }
-
   const { left_data, right_data } = useMemo(
     () =>
-      massage_data(
+      buildFactionData(
         leftffscouterdata,
         rightffscouterdata,
         leftfactionbasic,
         rightfactionbasic,
-        easyFFMax,
-        possibleFFMax,
+        { easyFFMax, possibleFFMax, minimumFFTarget },
       ),
     [
       leftffscouterdata,
@@ -396,6 +256,7 @@ export function MyChart({
       rightfactionbasic,
       easyFFMax,
       possibleFFMax,
+      minimumFFTarget,
     ],
   );
 
