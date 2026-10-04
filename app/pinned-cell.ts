@@ -98,3 +98,27 @@ export function stepPin(pin: Pin, axes: PinAxes, step: PinStep): Pin {
 export function closePin(): Pin {
   return null;
 }
+
+// The axes together with which of their cells are targets. A direction of
+// the war is one.
+export interface PinTargets extends PinAxes {
+  // cells[attacker index][defender index].
+  cells: readonly (readonly { isTarget: boolean }[])[];
+}
+
+// The first arrow key press with nothing pinned places the pin on the
+// selected attacker's column, at the easiest end of their run of targets (the
+// first of them along the defender axis), or on the first defender when they
+// have no targets. With nothing selected, or a selected member who is not on
+// the attacker axis, it is placed on the first attacker and first defender.
+export function firstArrowPin(
+  axes: PinTargets,
+  selectedAttackerId: number | null,
+): Pin {
+  const attacker = axes.attackers.findIndex((m) => m.id === selectedAttackerId);
+  if (attacker < 0) {
+    return placePin(axes, { attacker: 0, defender: 0 });
+  }
+  const easiest = axes.cells[attacker].findIndex((cell) => cell.isTarget);
+  return placePin(axes, { attacker, defender: Math.max(easiest, 0) });
+}
