@@ -1,4 +1,5 @@
 import {
+  KeyboardEvent,
   PointerEvent,
   ReactNode,
   useCallback,
@@ -22,6 +23,7 @@ import { DIFFICULTY_STEPS, Direction } from "./direction";
 import {
   canStepPin,
   closePin,
+  firstArrowPin,
   Pin,
   pinnedCellIndex,
   PinStep,
@@ -802,6 +804,15 @@ function PinPanel({
   );
 }
 
+// The step each arrow key makes, as the panel's step buttons do: left and
+// right along the attackers, up and down the defenders.
+const ARROW_STEPS: Record<string, PinStep> = {
+  ArrowLeft: "previousAttacker",
+  ArrowRight: "nextAttacker",
+  ArrowDown: "previousDefender",
+  ArrowUp: "nextDefender",
+};
+
 // The hovered cell and where the pointer is, in the browser window's
 // coordinates.
 interface Hover {
@@ -813,14 +824,17 @@ interface Hover {
 // difficulty, attackers along the bottom and defenders up the side. Its pin
 // is held by whoever renders it, so that it outlives the heatmap being
 // unmounted; `onSelectAttacker` is told the pin's attacker whenever a pin is
-// placed or its attacker stepped.
+// placed or its attacker stepped. `selectedAttackerId` is the selected member
+// of the attacking faction.
 export function TargetHeatmap({
   direction,
+  selectedAttackerId,
   pin,
   onPinChange,
   onSelectAttacker,
 }: {
   direction: Direction;
+  selectedAttackerId: number | null;
   pin: Pin;
   onPinChange: (pin: Pin) => void;
   onSelectAttacker: (memberId: number) => void;
@@ -997,10 +1011,59 @@ export function TargetHeatmap({
     [direction, pinAttacker, pinDefender],
   );
 
+  // The keys of the focused plot: the arrows step the pin, or place it when
+  // nothing is pinned, and Escape closes it. Focus stays on the plot
+  // throughout. An arrow never scrolls the page, even at the end of an axis.
+  const pressKey = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      if (event.key === "Escape") {
+        if (pin) {
+          onPinChange(closePin());
+        }
+        return;
+      }
+      const step = ARROW_STEPS[event.key];
+      if (!step) {
+        return;
+      }
+      event.preventDefault();
+      if (pinCell) {
+        movePin(stepPin(pin, direction, step));
+        return;
+      }
+      const placed = firstArrowPin(direction, selectedAttackerId);
+      if (placed) {
+        onPinChange(placed);
+        onSelectAttacker(placed.attackerId);
+      }
+    },
+    [
+      direction,
+      selectedAttackerId,
+      pin,
+      pinCell,
+      movePin,
+      onPinChange,
+      onSelectAttacker,
+    ],
+  );
+
   return (
     <div>
       <HeatmapLegend direction={direction} counts={counts} />
-      <div ref={containerRef} className="w-full">
+      {/* The plot is the tab stop: a click on it focuses it too, so the arrow
+          keys work after a click on a cell. */}
+      <div
+        ref={containerRef}
+        className="focus-visible:ring-ring/50 w-full rounded-sm outline-none focus-visible:ring-[3px]"
+        role="application"
+        aria-label="Target heatmap: the arrow keys move the pinned cell, Escape closes it"
+        tabIndex={0}
+        onKeyDown={pressKey}
+      >
         <svg
           width="100%"
           height={margin.top + PLOT_HEIGHT + margin.bottom}
