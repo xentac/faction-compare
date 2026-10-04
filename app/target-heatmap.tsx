@@ -1,5 +1,14 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  PointerEvent,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { fitName, labelEvery } from "./axis-names";
+import { cellDetailRows, DetailRow } from "./cell-details";
 import { DIFFICULTY_STEPS, Direction } from "./direction";
 import { useTextMeasure } from "./use-text-measure";
 
@@ -24,6 +33,8 @@ const ATTACKER_NAME_DROP = 8;
 // Room past the end of the longest bar for a count printed beside it.
 const TOP_COUNT_ROOM = 12;
 const RIGHT_COUNT_ROOM = 22;
+// The gap between the end of a bar and the hovered count printed past it.
+const COUNT_GAP = 3;
 
 // The space around the cell area inside the SVG, which holds the edge bars
 // and axis names. It depends only on the card's width, never on the members,
@@ -137,6 +148,81 @@ export function plotGeometry(
       defenderCount > 0
         ? edges(defenderCount, height).map((y) => snap(height) - y)
         : [],
+  };
+}
+
+// One cell of the heatmap, as indexes into the direction's two axes.
+export interface CellIndex {
+  attacker: number;
+  defender: number;
+}
+
+// The index of the span holding a position, given the span edges in ascending
+// order, or -1 when it is outside them. A span includes its lower edge.
+function spanAt(position: number, edge: (i: number) => number, count: number) {
+  if (count <= 0 || !(position >= edge(0)) || !(position < edge(count))) {
+    return -1;
+  }
+  // Spans are near enough equal that this guess is at most a step off.
+  let i = Math.min(
+    count - 1,
+    Math.floor(((position - edge(0)) / (edge(count) - edge(0))) * count),
+  );
+  while (i > 0 && position < edge(i)) {
+    i--;
+  }
+  while (i < count - 1 && position >= edge(i + 1)) {
+    i++;
+  }
+  return i;
+}
+
+// The cell drawn at a position in the plot's coordinates (x from the left of
+// the cell area, y from its top), or null outside the cell area.
+export function cellAt(
+  g: PlotGeometry,
+  x: number,
+  y: number,
+): CellIndex | null {
+  const attackerCount = g.columnEdges.length - 1;
+  const defenderCount = g.rowEdges.length - 1;
+  const attacker = spanAt(x, (i) => g.columnEdges[i], attackerCount);
+  // Row edges decrease from the bottom up; read them from the top down.
+  const fromTop = spanAt(
+    y,
+    (i) => g.rowEdges[defenderCount - i],
+    defenderCount,
+  );
+  if (attacker < 0 || fromTop < 0) {
+    return null;
+  }
+  return { attacker, defender: defenderCount - 1 - fromTop };
+}
+
+// How far the tooltip sits from the pointer, and from the screen's edges.
+const TOOLTIP_OFFSET = 12;
+const TOOLTIP_EDGE = 4;
+
+// Where the top left of the tooltip goes, in the coordinates of the pointer
+// and the screen: below and to the right of the pointer, switching to its
+// other side where it would run off the screen, and never off the screen.
+export function tooltipPosition(
+  pointer: { x: number; y: number },
+  size: { width: number; height: number },
+  screen: { width: number; height: number },
+): { left: number; top: number } {
+  const place = (at: number, length: number, available: number) => {
+    const after = at + TOOLTIP_OFFSET;
+    const before = at - TOOLTIP_OFFSET - length;
+    const wanted = after + length + TOOLTIP_EDGE <= available ? after : before;
+    return Math.max(
+      TOOLTIP_EDGE,
+      Math.min(wanted, available - length - TOOLTIP_EDGE),
+    );
+  };
+  return {
+    left: place(pointer.x, size.width, screen.width),
+    top: place(pointer.y, size.height, screen.height),
   };
 }
 
@@ -312,19 +398,23 @@ function HeatmapLegend({
 }
 
 // The axis names: every nth attacker name under the plot, rotated 45 degrees,
-// and every nth defender name to its left. Inert, like the edge bars.
+// and every nth defender name to its left. Inert, like the edge bars. While a
+// cell is hovered its two names are bold, whether or not they are among the
+// every nth, and the others are dimmed.
 function AxisNames({
   direction,
   geometry,
   layout,
   attackerNames,
   defenderNames,
+  hover,
 }: {
   direction: Direction;
   geometry: PlotGeometry;
   layout: PlotLayout;
   attackerNames: string[];
   defenderNames: string[];
+  hover: CellIndex | null;
 }) {
   const attackerEvery = labelEvery(
     geometry.width / direction.attackers.length,
@@ -335,37 +425,226 @@ function AxisNames({
     DEFENDER_LABEL_SPACING,
   );
   const { columnEdges, rowEdges } = geometry;
+  const attackerName = (a: number) => (
+    <text
+      key={direction.attackers[a].id}
+      transform={`translate(${(columnEdges[a] + columnEdges[a + 1]) / 2} ${geometry.height + ATTACKER_NAME_DROP}) rotate(-45)`}
+    >
+      {attackerNames[a]}
+    </text>
+  );
+  const defenderName = (d: number) => (
+    <text
+      key={direction.defenders[d].id}
+      x={-DEFENDER_NAME_GAP}
+      y={(rowEdges[d] + rowEdges[d + 1]) / 2}
+    >
+      {defenderNames[d]}
+    </text>
+  );
   return (
     <g
-      className="fill-muted-foreground select-none"
+      className="select-none"
       fontSize={layout.fontSize}
       textAnchor="end"
       dominantBaseline="central"
       pointerEvents="none"
     >
-      {direction.attackers.map((attacker, a) =>
-        a % attackerEvery === 0 ? (
-          <text
-            key={attacker.id}
-            transform={`translate(${(columnEdges[a] + columnEdges[a + 1]) / 2} ${geometry.height + ATTACKER_NAME_DROP}) rotate(-45)`}
-          >
-            {attackerNames[a]}
-          </text>
-        ) : null,
-      )}
-      {direction.defenders.map((defender, d) =>
-        d % defenderEvery === 0 ? (
-          <text
-            key={defender.id}
-            x={-DEFENDER_NAME_GAP}
-            y={(rowEdges[d] + rowEdges[d + 1]) / 2}
-          >
-            {defenderNames[d]}
-          </text>
-        ) : null,
+      <g className="fill-muted-foreground" opacity={hover ? 0.4 : undefined}>
+        {direction.attackers.map((_, a) =>
+          a % attackerEvery === 0 && a !== hover?.attacker
+            ? attackerName(a)
+            : null,
+        )}
+        {direction.defenders.map((_, d) =>
+          d % defenderEvery === 0 && d !== hover?.defender
+            ? defenderName(d)
+            : null,
+        )}
+      </g>
+      {hover && (
+        <g className="fill-foreground" fontWeight="bold">
+          {attackerName(hover.attacker)}
+          {defenderName(hover.defender)}
+        </g>
       )}
     </g>
   );
+}
+
+// The crosshair on the hovered cell: its column and row tinted and the cell
+// itself outlined. Drawn in the plot's coordinates, over the cells.
+function HoverCrosshair({
+  geometry,
+  hover,
+}: {
+  geometry: PlotGeometry;
+  hover: CellIndex;
+}) {
+  const left = geometry.columnEdges[hover.attacker];
+  const right = geometry.columnEdges[hover.attacker + 1];
+  const bottom = geometry.rowEdges[hover.defender];
+  const top = geometry.rowEdges[hover.defender + 1];
+  return (
+    <g pointerEvents="none">
+      <path
+        d={`M${left} 0H${right}V${geometry.height}H${left}ZM0 ${top}H${geometry.width}V${bottom}H0Z`}
+        className="fill-foreground/20"
+      />
+      <rect
+        x={left - 0.5}
+        y={top - 0.5}
+        width={right - left + 1}
+        height={bottom - top + 1}
+        fill="none"
+        strokeWidth={1}
+        className="stroke-foreground"
+      />
+    </g>
+  );
+}
+
+// The hovered attacker's and defender's bars at full strength, with the
+// target count printed above the one and the share count beside the other.
+function HoverCounts({
+  direction,
+  geometry,
+  layout,
+  counts,
+  devicePixelRatio,
+  hover,
+}: {
+  direction: Direction;
+  geometry: PlotGeometry;
+  layout: PlotLayout;
+  counts: LargestCounts;
+  devicePixelRatio: number;
+  hover: CellIndex;
+}) {
+  const snap = (n: number) =>
+    Math.round(n * devicePixelRatio) / devicePixelRatio;
+  const attacker = direction.attackers[hover.attacker];
+  const defender = direction.defenders[hover.defender];
+  const left = geometry.columnEdges[hover.attacker];
+  const right = geometry.columnEdges[hover.attacker + 1];
+  const bottom = geometry.rowEdges[hover.defender];
+  const top = geometry.rowEdges[hover.defender + 1];
+  const targetBar = snap(
+    edgeBarLength(
+      attacker.targetCount,
+      counts.targetCount,
+      layout.targetBarLength,
+    ),
+  );
+  const shareBar = snap(
+    edgeBarLength(
+      defender.shareCount,
+      counts.shareCount,
+      layout.shareBarLength,
+    ),
+  );
+  return (
+    <g className="fill-foreground select-none" pointerEvents="none">
+      <path
+        shapeRendering="crispEdges"
+        d={
+          `M${left} ${-BAR_GAP}H${right}v${-targetBar}H${left}Z` +
+          `M${geometry.width + BAR_GAP} ${top}h${shareBar}V${bottom}h${-shareBar}Z`
+        }
+      />
+      <g fontSize={layout.fontSize} className="tabular-nums">
+        <text
+          x={(left + right) / 2}
+          y={-BAR_GAP - targetBar - COUNT_GAP}
+          textAnchor="middle"
+        >
+          {attacker.targetCount}
+        </text>
+        <text
+          x={geometry.width + BAR_GAP + shareBar + COUNT_GAP}
+          y={(top + bottom) / 2}
+          dominantBaseline="central"
+        >
+          {defender.shareCount}
+        </text>
+      </g>
+    </g>
+  );
+}
+
+// The detail rows of a cell, as the hover tooltip and the pinned-cell panel
+// show them.
+export function CellDetailRows({ rows }: { rows: DetailRow[] }) {
+  return (
+    <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1.5 leading-none">
+      {rows.map((row) => (
+        <div key={row.label} className="col-span-2 grid grid-cols-subgrid">
+          <span className="text-muted-foreground">{row.label}</span>
+          <span className="text-foreground flex items-center justify-end gap-x-1.5 tabular-nums">
+            {row.name != null && <span className="font-bold">{row.name}</span>}
+            <span>{row.value}</span>
+            {row.difficulty != null && (
+              <span
+                className={`h-2.5 w-2.5 shrink-0 rounded-[2px] ${DIFFICULTY_BACKGROUND[row.difficulty]}`}
+                aria-hidden="true"
+              />
+            )}
+          </span>
+          {row.note != null && (
+            <span className="text-muted-foreground col-span-2 mt-1 text-right">
+              {row.note}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The floating tooltip of the hovered cell, beside the pointer and kept on
+// screen. The pointer position is in the browser window's coordinates.
+function HoverTooltip({
+  rows,
+  pointer,
+}: {
+  rows: DetailRow[];
+  pointer: { x: number; y: number };
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Placed after every render, before the browser paints: its size depends on
+  // the rows.
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return;
+    }
+    const { left, top } = tooltipPosition(
+      pointer,
+      { width: element.offsetWidth, height: element.offsetHeight },
+      {
+        width: document.documentElement.clientWidth,
+        height: document.documentElement.clientHeight,
+      },
+    );
+    element.style.transform = `translate(${left}px, ${top}px)`;
+  });
+  return createPortal(
+    <div
+      ref={ref}
+      role="tooltip"
+      className="border-border/50 bg-background text-foreground pointer-events-none fixed top-0 left-0 z-50 w-max max-w-[calc(100vw-8px)] rounded-lg border px-2.5 py-1.5 text-xs shadow-xl"
+    >
+      <CellDetailRows rows={rows} />
+    </div>,
+    document.body,
+  );
+}
+
+// The hovered cell and where the pointer is, in the browser window's
+// coordinates.
+interface Hover {
+  cell: CellIndex;
+  pointer: { x: number; y: number };
 }
 
 // The target heatmap of one direction of the war: every target coloured by
@@ -424,6 +703,49 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
     [direction.defenders, layout.defenderNameSpace, measure],
   );
 
+  // Hover is for a mouse only: a finger or pen never sets it, whatever the
+  // device. Each pointer event says which it came from.
+  const [hover, setHover] = useState<Hover | null>(null);
+  const hoverAt = useCallback(
+    (event: PointerEvent<SVGRectElement>) => {
+      if (event.pointerType !== "mouse") {
+        setHover(null);
+        return;
+      }
+      const box = event.currentTarget.getBoundingClientRect();
+      const cell = cellAt(
+        geometry,
+        event.clientX - box.left,
+        event.clientY - box.top,
+      );
+      setHover(
+        cell && { cell, pointer: { x: event.clientX, y: event.clientY } },
+      );
+    },
+    [geometry],
+  );
+  const endHover = useCallback(() => setHover(null), []);
+  // A cell that is still on the axes: the factions may have changed under a
+  // resting pointer.
+  const hoverCell =
+    hover &&
+    hover.cell.attacker < direction.attackers.length &&
+    hover.cell.defender < direction.defenders.length
+      ? hover.cell
+      : null;
+  const hoverAttacker = hoverCell?.attacker;
+  const hoverDefender = hoverCell?.defender;
+  const hoverRows = useMemo(
+    () =>
+      hoverAttacker != null && hoverDefender != null
+        ? cellDetailRows(direction, {
+            attacker: hoverAttacker,
+            defender: hoverDefender,
+          })
+        : null,
+    [direction, hoverAttacker, hoverDefender],
+  );
+
   return (
     <div>
       <HeatmapLegend direction={direction} counts={counts} />
@@ -458,10 +780,24 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
               {paths.map((d, step) => (
                 <path key={step} d={d} className={DIFFICULTY_FILL[step]} />
               ))}
+              {hoverCell && (
+                <HoverCrosshair geometry={geometry} hover={hoverCell} />
+              )}
               <g className={BAR_FILL} pointerEvents="none">
                 <path d={bars.targets} />
                 <path d={bars.shares} />
               </g>
+              {/* The one set of pointer handlers: the cell under the pointer
+                  is worked out from its position. */}
+              <rect
+                width={plotWidth}
+                height={PLOT_HEIGHT}
+                fill="transparent"
+                onPointerMove={hoverAt}
+                onPointerDown={hoverAt}
+                onPointerLeave={endHover}
+                onPointerCancel={endHover}
+              />
             </g>
           )}
           {plotWidth > 0 && attackerNames && defenderNames && (
@@ -472,11 +808,25 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
                 layout={layout}
                 attackerNames={attackerNames}
                 defenderNames={defenderNames}
+                hover={hoverCell}
               />
+              {hoverCell && (
+                <HoverCounts
+                  direction={direction}
+                  geometry={geometry}
+                  layout={layout}
+                  counts={counts}
+                  devicePixelRatio={devicePixelRatio}
+                  hover={hoverCell}
+                />
+              )}
             </g>
           )}
         </svg>
       </div>
+      {hover && hoverRows && (
+        <HoverTooltip rows={hoverRows} pointer={hover.pointer} />
+      )}
     </div>
   );
 }
