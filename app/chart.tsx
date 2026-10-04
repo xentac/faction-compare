@@ -11,7 +11,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import { useState, Dispatch, SetStateAction, useMemo } from "react";
+import { useState, useMemo } from "react";
 import {
   Area,
   AreaChart,
@@ -34,6 +34,7 @@ import {
 import { buildFactionData } from "./faction-data";
 import { CategoricalChartState } from "recharts/types/chart/types";
 import { DataTable } from "./data-table";
+import { memberView } from "./member-view";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import z from "zod";
@@ -170,74 +171,25 @@ export function MyChart({
   leftfactionbasic,
   rightfactionbasic,
 }: ChartInterface) {
-  const [leftSelected, setLeftSelected] = useState<DrillDownData[]>([]);
-  const [leftNameSelected, setLeftNameSelected] = useState("");
-  const [rightSelected, setRightSelected] = useState<DrillDownData[]>([]);
-  const [rightNameSelected, setRightNameSelected] = useState("");
+  const [leftSelectedId, setLeftSelectedId] = useState<number | null>(null);
+  const [rightSelectedId, setRightSelectedId] = useState<number | null>(null);
   const [easyFFMax, setEasyFFMax] = useState<number>(2.5);
   const [possibleFFMax, setPossibleFFMax] = useState<number>(4.0);
   const [minimumFFTarget, setMinimumFFTarget] = useState<number>(1.75);
 
-  function handleChartClick(
-    setter: Dispatch<SetStateAction<DrillDownData[]>>,
-    nameSetter: Dispatch<SetStateAction<string>>,
-  ) {
+  function handleChartClick(select: (id: number) => void) {
     return function (nextState: CategoricalChartState) {
       if (!nextState.activePayload || !nextState.activePayload[0]) {
         return;
       }
-      setter(massage_graph_data(nextState.activePayload[0].payload));
-      nameSetter(nextState.activePayload[0].payload.name);
+      select(nextState.activePayload[0].payload.id);
     };
   }
 
-  function handleFactionTableClick(
-    setter: Dispatch<SetStateAction<DrillDownData[]>>,
-    nameSetter: Dispatch<SetStateAction<string>>,
-  ) {
+  function handleFactionTableClick(select: (id: number) => void) {
     return function (value: GraphData) {
-      setter(massage_graph_data(value));
-      nameSetter(value.name);
+      select(value.id);
     };
-  }
-
-  function massage_graph_data(d: GraphData): DrillDownData[] {
-    return d.opponent_scores.map((value) => {
-      return {
-        name: value.name,
-        id: value.id,
-        attacker_ff: value.attacker_ff,
-        defender_ff: value.defender_ff,
-        attacker_ff_str: value.attacker_ff_str,
-        defender_ff_str: value.defender_ff_str,
-        bss_public: value.bss_public,
-        bs_estimate_human: value.bs_estimate_human,
-        easy_attack:
-          value.attacker_ff != null && value.attacker_ff <= easyFFMax ? 1 : 0,
-        possible_attack:
-          value.attacker_ff != null &&
-          value.attacker_ff <= possibleFFMax &&
-          value.attacker_ff > easyFFMax
-            ? 1
-            : 0,
-        hard_attack:
-          value.attacker_ff != null && value.attacker_ff > possibleFFMax
-            ? 1
-            : 0,
-        easy_defend:
-          value.defender_ff != null && value.defender_ff <= easyFFMax ? 1 : 0,
-        possible_defend:
-          value.defender_ff != null &&
-          value.defender_ff <= possibleFFMax &&
-          value.defender_ff > easyFFMax
-            ? 1
-            : 0,
-        hard_defend:
-          value.defender_ff != null && value.defender_ff > possibleFFMax
-            ? 1
-            : 0,
-      };
-    });
   }
 
   const { left_data, right_data } = useMemo(
@@ -258,6 +210,15 @@ export function MyChart({
       possibleFFMax,
       minimumFFTarget,
     ],
+  );
+
+  const { name: leftNameSelected, rows: leftSelected } = useMemo(
+    () => memberView(left_data, leftSelectedId, { easyFFMax, possibleFFMax }),
+    [left_data, leftSelectedId, easyFFMax, possibleFFMax],
+  );
+  const { name: rightNameSelected, rows: rightSelected } = useMemo(
+    () => memberView(right_data, rightSelectedId, { easyFFMax, possibleFFMax }),
+    [right_data, rightSelectedId, easyFFMax, possibleFFMax],
   );
 
   function InnerMemberChartContainer({
@@ -422,7 +383,7 @@ export function MyChart({
               <InnerFactionChartContainer
                 data={left_data}
                 chartType={ChartType.attack}
-                onClick={handleChartClick(setLeftSelected, setLeftNameSelected)}
+                onClick={handleChartClick(setLeftSelectedId)}
               />
             </CardContent>
           </Card>
@@ -434,10 +395,7 @@ export function MyChart({
               <InnerFactionChartContainer
                 data={right_data}
                 chartType={ChartType.attack}
-                onClick={handleChartClick(
-                  setRightSelected,
-                  setRightNameSelected,
-                )}
+                onClick={handleChartClick(setRightSelectedId)}
               />
             </CardContent>
           </Card>
@@ -449,7 +407,7 @@ export function MyChart({
               <InnerFactionChartContainer
                 data={left_data}
                 chartType={ChartType.defend}
-                onClick={handleChartClick(setLeftSelected, setLeftNameSelected)}
+                onClick={handleChartClick(setLeftSelectedId)}
               />
             </CardContent>
           </Card>
@@ -461,10 +419,7 @@ export function MyChart({
               <InnerFactionChartContainer
                 data={right_data}
                 chartType={ChartType.defend}
-                onClick={handleChartClick(
-                  setRightSelected,
-                  setRightNameSelected,
-                )}
+                onClick={handleChartClick(setRightSelectedId)}
               />
             </CardContent>
           </Card>
@@ -482,10 +437,7 @@ export function MyChart({
               <DataTable
                 columns={FactionColumns}
                 data={left_data}
-                onClick={handleFactionTableClick(
-                  setLeftSelected,
-                  setLeftNameSelected,
-                )}
+                onClick={handleFactionTableClick(setLeftSelectedId)}
               />
             </CardContent>
           </Card>
@@ -498,10 +450,7 @@ export function MyChart({
               <DataTable
                 columns={FactionColumns}
                 data={right_data}
-                onClick={handleFactionTableClick(
-                  setRightSelected,
-                  setRightNameSelected,
-                )}
+                onClick={handleFactionTableClick(setRightSelectedId)}
               />
             </CardContent>
           </Card>
