@@ -4,6 +4,8 @@ import {
   canStepPin,
   closePin,
   firstArrowPin,
+  followSelection,
+  holdPin,
   Pin,
   pinnedCellIndex,
   placePin,
@@ -222,5 +224,140 @@ describe("the first arrow press with nothing pinned", () => {
   test("a selected attacker with targets is pinned at the easiest end of their run", () => {
     // Venqua's targets are Nebel (2.60) and Dorn (3.00): Nebel is the easiest.
     expect(firstArrowPin(war, 1)).toEqual({ attackerId: 1, defenderId: 11 });
+  });
+});
+
+describe("following a selection made elsewhere", () => {
+  test("moves to the selected attacker, keeping a defender who is their target", () => {
+    // Low against Dorn, then Venqua is selected: Dorn is a target of Venqua.
+    expect(followSelection({ attackerId: 3, defenderId: 12 }, war, 1)).toEqual({
+      attackerId: 1,
+      defenderId: 12,
+    });
+  });
+
+  test("moves to the nearest end of the run when the defender is not their target", () => {
+    // Venqua's run of targets is Nebel to Dorn. Titan is above it, so the
+    // pin lands on Dorn; Blank and Mouse are below it, so it lands on Nebel.
+    expect(followSelection({ attackerId: 3, defenderId: 13 }, war, 1)).toEqual({
+      attackerId: 1,
+      defenderId: 12,
+    });
+    expect(followSelection({ attackerId: 3, defenderId: 15 }, war, 1)).toEqual({
+      attackerId: 1,
+      defenderId: 11,
+    });
+    expect(followSelection({ attackerId: 2, defenderId: 14 }, war, 1)).toEqual({
+      attackerId: 1,
+      defenderId: 11,
+    });
+  });
+
+  test("keeps the defender when the selected attacker has no targets", () => {
+    // Venqua against Dorn, then Low is selected: Low has no targets.
+    expect(followSelection({ attackerId: 1, defenderId: 12 }, war, 3)).toEqual({
+      attackerId: 3,
+      defenderId: 12,
+    });
+  });
+
+  test("closes when the selected member is not on the attacker axis", () => {
+    expect(
+      followSelection({ attackerId: 1, defenderId: 12 }, war, 99),
+    ).toBeNull();
+    // Nor when nobody is selected any more.
+    expect(
+      followSelection({ attackerId: 1, defenderId: 12 }, war, null),
+    ).toBeNull();
+  });
+
+  test("stays put when the selected attacker is already the pinned one", () => {
+    // Venqua against Titan, not a target: the pin was put there on purpose.
+    const pin: Pin = { attackerId: 1, defenderId: 13 };
+    expect(followSelection(pin, war, 1)).toEqual(pin);
+  });
+
+  test("a closed pin stays closed: selecting elsewhere opens nothing", () => {
+    expect(followSelection(null, war, 1)).toBeNull();
+    expect(followSelection(null, war, 99)).toBeNull();
+  });
+});
+
+describe("a target range change", () => {
+  test("holds the pin on the same pair, target or not", () => {
+    // Venqua against Dorn (3.00) is a target until the range stops at 2.8;
+    // Venqua's only target is then Nebel, and the pin does not move to it.
+    const narrowed = buildDirection({
+      attackingFaction: attacking.basic,
+      defendingFaction: defending.basic,
+      attackingEstimates: attacking.estimates,
+      defendingEstimates: defending.estimates,
+      targetRange: { minimum: 1.75, maximum: 2.8 },
+    });
+    expect(narrowed.attackers.map((a) => a.targetCount)).toEqual([0, 0, 1]);
+    const pin: Pin = { attackerId: 1, defenderId: 12 };
+    expect(holdPin(pin, narrowed)).toEqual(pin);
+  });
+});
+
+describe("a faction reload", () => {
+  // The attacking faction without one member, and the remaining estimates
+  // changed so that the axis order differs.
+  const reload = (
+    attackers: FixtureMember[],
+    defenders: FixtureMember[],
+  ): Direction => {
+    const a = faction("Attackers", attackers);
+    const d = faction("Defenders", defenders);
+    return buildDirection({
+      attackingFaction: a.basic,
+      defendingFaction: d.basic,
+      attackingEstimates: a.estimates,
+      defendingEstimates: d.estimates,
+      targetRange: { minimum: 1.75, maximum: 4.0 },
+    });
+  };
+  const defenders = [
+    { id: 11, name: "Nebel", estimate: 600 },
+    { id: 12, name: "Dorn", estimate: 750 },
+  ];
+  const pin: Pin = { attackerId: 1, defenderId: 12 };
+
+  test("closes the pin when its attacker is gone", () => {
+    const without = reload([{ id: 3, name: "Low", estimate: 500 }], defenders);
+    expect(holdPin(pin, without)).toBeNull();
+  });
+
+  test("closes the pin when its defender is gone", () => {
+    const without = reload(
+      [{ id: 1, name: "Venqua", estimate: 1000 }],
+      [{ id: 11, name: "Nebel", estimate: 600 }],
+    );
+    expect(holdPin(pin, without)).toBeNull();
+  });
+
+  test("follows both members to their new positions when they remain", () => {
+    // Venqua now has the lowest estimate and Dorn the highest but one; a new
+    // member has joined each faction.
+    const moved = reload(
+      [
+        { id: 1, name: "Venqua", estimate: 100 },
+        { id: 3, name: "Low", estimate: 500 },
+        { id: 4, name: "Newcomer", estimate: 800 },
+      ],
+      [
+        { id: 11, name: "Nebel", estimate: 600 },
+        { id: 12, name: "Dorn", estimate: 900 },
+        { id: 16, name: "Giant", estimate: 5000 },
+      ],
+    );
+    expect(pinnedCellIndex(pin, war)).toEqual({ attacker: 2, defender: 3 });
+    const held = holdPin(pin, moved);
+    expect(held).toEqual(pin);
+    expect(pinnedCellIndex(held, moved)).toEqual({ attacker: 0, defender: 1 });
+  });
+
+  test("a closed pin stays closed", () => {
+    expect(holdPin(null, war)).toBeNull();
   });
 });
