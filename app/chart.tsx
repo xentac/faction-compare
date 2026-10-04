@@ -35,8 +35,8 @@ import { buildFactionData } from "./faction-data";
 import { CategoricalChartState } from "recharts/types/chart/types";
 import { DataTable } from "./data-table";
 import { memberView } from "./member-view";
-import { buildDirection } from "./direction";
-import { Pin } from "./pinned-cell";
+import { buildDirection, Direction } from "./direction";
+import { followSelection, holdPin, Pin } from "./pinned-cell";
 import { TargetHeatmap } from "./target-heatmap";
 import { RankedChart } from "./ranked-chart";
 import { useTimeToHits } from "./use-time-to-hits";
@@ -170,6 +170,23 @@ function InnerFactionChartContainer({
   );
 }
 
+// The pinned cell of one target heatmap, kept in step with the rest of the
+// page: it holds on to its two members when the direction changes (the target
+// range, or a reload of the factions) and follows the selected member of the
+// attacking faction wherever that selection was made.
+function usePin(
+  direction: Direction,
+  selectedId: number | null,
+): [Pin, (pin: Pin) => void] {
+  const [pin, setPin] = useState<Pin>(null);
+  const [seen, setSeen] = useState({ direction, selectedId });
+  if (seen.direction !== direction || seen.selectedId !== selectedId) {
+    setSeen({ direction, selectedId });
+    setPin(followSelection(holdPin(pin, direction), direction, selectedId));
+  }
+  return [pin, setPin];
+}
+
 export function MyChart({
   leftffscouterdata,
   rightffscouterdata,
@@ -178,9 +195,6 @@ export function MyChart({
 }: ChartInterface) {
   const [leftSelectedId, setLeftSelectedId] = useState<number | null>(null);
   const [rightSelectedId, setRightSelectedId] = useState<number | null>(null);
-  // Each target heatmap has its own pinned cell.
-  const [leftPin, setLeftPin] = useState<Pin>(null);
-  const [rightPin, setRightPin] = useState<Pin>(null);
   const [easyFFMax, setEasyFFMax] = useState<number>(2.5);
   const [possibleFFMax, setPossibleFFMax] = useState<number>(4.0);
   const [minimumFFTarget, setMinimumFFTarget] = useState<number>(1.75);
@@ -260,6 +274,10 @@ export function MyChart({
       possibleFFMax,
     ],
   );
+
+  // Each target heatmap has its own pinned cell.
+  const [leftPin, setLeftPin] = usePin(leftDirection, leftSelectedId);
+  const [rightPin, setRightPin] = usePin(rightDirection, rightSelectedId);
 
   // The time-to-hits estimate of each direction, null while it is computed.
   // Held here, above the tabs, so that leaving and re-entering the Faction

@@ -39,7 +39,7 @@ export const NARROW_BELOW = 480;
 // The forms a name is drawn in, each the leading part of a CSS font shorthand.
 // A name is measured at the widest of them, so its text is the same in every
 // state.
-export const NAME_FORMS = ["bold"];
+export const NAME_FORMS = ["bold", "italic bold"];
 // The room one label needs along its axis; every nth name is shown so that
 // labels are at least this far apart.
 export const ATTACKER_LABEL_SPACING = 15;
@@ -49,7 +49,7 @@ const BAR_GAP = 2;
 // The gap between the cell area and the defender names on its left, and the
 // drop from the cell area to where the attacker names end.
 const DEFENDER_NAME_GAP = 6;
-const ATTACKER_NAME_DROP = 8;
+const ATTACKER_NAME_DROP = 11;
 // Room past the end of the longest bar for a count printed beside it.
 const TOP_COUNT_ROOM = 12;
 const RIGHT_COUNT_ROOM = 22;
@@ -61,6 +61,12 @@ const TAP_SLOP = 8;
 // The pin highlight's colour: unlike the hover crosshair's ink and unlike the
 // difficulty ramp, in both themes.
 const PIN_STROKE = "stroke-sky-600 dark:stroke-sky-400";
+// The selected attacker on the attacker axis: the name italic and in the
+// pin's colour (also when bold), and a small triangle at the foot of the
+// column pointing up at it.
+const SELECTED_NAME = "fill-sky-700 dark:fill-sky-300 italic";
+const SELECTED_MARKER = "fill-sky-600 dark:fill-sky-400";
+const SELECTED_MARKER_SIZE = 5;
 
 // The space around the cell area inside the SVG, which holds the edge bars
 // and axis names. It depends only on the card's width, never on the members,
@@ -426,8 +432,11 @@ function HeatmapLegend({
 // The axis names: every nth attacker name under the plot, rotated 45 degrees,
 // and every nth defender name to its left. Inert, like the edge bars. The two
 // names of the pinned cell and of the hovered cell are bold, whether or not
-// they are among the every nth. A pinned name hides the every nth names it
-// would overlap; while a cell is hovered the every nth names are dimmed.
+// they are among the every nth, and the selected attacker's name is always
+// shown in its own style with a marker at the foot of its column. A pinned
+// or selected name hides the every nth names it would overlap; while a cell
+// is hovered the every nth names and the selected name are dimmed, the marker
+// is not.
 function AxisNames({
   direction,
   geometry,
@@ -436,6 +445,7 @@ function AxisNames({
   defenderNames,
   hover,
   pin,
+  selected,
 }: {
   direction: Direction;
   geometry: PlotGeometry;
@@ -444,33 +454,47 @@ function AxisNames({
   defenderNames: string[];
   hover: CellIndex | null;
   pin: CellIndex | null;
+  // The selected attacker's index on the attacker axis.
+  selected: number | null;
 }) {
   const attackerSlot = geometry.width / direction.attackers.length;
   const defenderSlot = geometry.height / direction.defenders.length;
   const attackerEvery = labelEvery(attackerSlot, ATTACKER_LABEL_SPACING);
   const defenderEvery = labelEvery(defenderSlot, DEFENDER_LABEL_SPACING);
   // Whether the every nth name at an index is drawn at rest: not when it is
-  // drawn bold instead, nor when it would overlap the pinned name.
+  // drawn bold instead, nor when it would overlap a name that wins over it
+  // (the pinned name, the selected name).
   const resting = (
     index: number,
     every: number,
     slot: number,
     spacing: number,
     hovered: number | undefined,
-    pinned: number | undefined,
+    winners: (number | null | undefined)[],
   ) =>
     index % every === 0 &&
     index !== hovered &&
-    (pinned == null || Math.abs(index - pinned) * slot >= spacing);
+    winners.every(
+      (winner) => winner == null || Math.abs(index - winner) * slot >= spacing,
+    );
   const { columnEdges, rowEdges } = geometry;
+  const columnCentre = (a: number) => (columnEdges[a] + columnEdges[a + 1]) / 2;
+  // The selected attacker's name is in the selected style in every state.
   const attackerName = (a: number) => (
     <text
       key={direction.attackers[a].id}
-      transform={`translate(${(columnEdges[a] + columnEdges[a + 1]) / 2} ${geometry.height + ATTACKER_NAME_DROP}) rotate(-45)`}
+      transform={`translate(${columnCentre(a)} ${geometry.height + ATTACKER_NAME_DROP}) rotate(-45)`}
+      className={a === selected ? SELECTED_NAME : undefined}
     >
       {attackerNames[a]}
     </text>
   );
+  // Bold when pinned or hovered; otherwise the selected name is drawn on its
+  // own, dimmed with the every nth names while a cell is hovered.
+  const selectedAtRest =
+    selected != null &&
+    selected !== pin?.attacker &&
+    selected !== hover?.attacker;
   const defenderName = (d: number) => (
     <text
       key={direction.defenders[d].id}
@@ -496,7 +520,7 @@ function AxisNames({
             attackerSlot,
             ATTACKER_LABEL_SPACING,
             hover?.attacker,
-            pin?.attacker,
+            [pin?.attacker, selected],
           )
             ? attackerName(a)
             : null,
@@ -508,12 +532,21 @@ function AxisNames({
             defenderSlot,
             DEFENDER_LABEL_SPACING,
             hover?.defender,
-            pin?.defender,
+            [pin?.defender],
           )
             ? defenderName(d)
             : null,
         )}
       </g>
+      {selectedAtRest && (
+        <g opacity={hover ? 0.4 : undefined}>{attackerName(selected)}</g>
+      )}
+      {selected != null && (
+        <path
+          className={SELECTED_MARKER}
+          d={`M${columnCentre(selected)} ${geometry.height + 1}l${SELECTED_MARKER_SIZE} ${SELECTED_MARKER_SIZE}h${-2 * SELECTED_MARKER_SIZE}Z`}
+        />
+      )}
       <g className="fill-foreground" fontWeight="bold">
         {pin && attackerName(pin.attacker)}
         {pin && defenderName(pin.defender)}
@@ -828,7 +861,7 @@ interface Hover {
 // is held by whoever renders it, so that it outlives the heatmap being
 // unmounted; `onSelectAttacker` is told the pin's attacker whenever a pin is
 // placed or its attacker stepped. `selectedAttackerId` is the selected member
-// of the attacking faction. `timeToHits` is the direction's estimate for
+// of the attacking faction, marked on the attacker axis. `timeToHits` is the direction's estimate for
 // `hitGoal`, or null while it is being computed.
 export function TargetHeatmap({
   direction,
@@ -1007,6 +1040,13 @@ export function TargetHeatmap({
     () => pinnedCellIndex(pin, direction),
     [pin, direction],
   );
+  // Where the selected attacker sits on the attacker axis, if they are on it.
+  const selectedAttacker = useMemo(() => {
+    const index = direction.attackers.findIndex(
+      (attacker) => attacker.id === selectedAttackerId,
+    );
+    return index < 0 ? null : index;
+  }, [direction.attackers, selectedAttackerId]);
   const pinAttacker = pinCell?.attacker;
   const pinDefender = pinCell?.defender;
   const pinRows = useMemo(
@@ -1136,6 +1176,7 @@ export function TargetHeatmap({
                 defenderNames={defenderNames}
                 hover={hoverCell}
                 pin={pinCell}
+                selected={selectedAttacker}
               />
               {hoverCell && (
                 <HoverCounts
