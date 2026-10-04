@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { memberView } from "./member-view";
 import { FairFightScore, GraphData } from "./types";
 
-const LIMITS = { easyFFMax: 2.5, possibleFFMax: 4.0 };
-
 function member(
   id: number,
   name: string,
@@ -39,7 +37,7 @@ describe("memberView", () => {
   test("shows nothing selected before any member is selected", () => {
     const faction = [member(1, "Alice"), member(2, "Bob")];
 
-    expect(memberView(faction, null, LIMITS)).toEqual({ name: "", rows: [] });
+    expect(memberView(faction, null)).toEqual({ name: "", rows: [] });
   });
 
   test("shows the selected member's name and one row per opponent", () => {
@@ -53,7 +51,7 @@ describe("memberView", () => {
     ];
     const faction = [member(1, "Alice"), member(2, "Bob", opponents)];
 
-    const view = memberView(faction, 2, LIMITS);
+    const view = memberView(faction, 2);
 
     expect(view.name).toBe("Bob");
     expect(
@@ -68,56 +66,13 @@ describe("memberView", () => {
       ["Yuri", "12", "3.00", "4.56"],
       ["Zed", "13", "5.00", "2.78"],
     ]);
-    expect(
-      view.rows.map((r) => [r.easy_attack, r.possible_attack, r.hard_attack]),
-    ).toEqual([
-      [1, 0, 0],
-      [0, 1, 0],
-      [0, 0, 1],
-    ]);
-    expect(
-      view.rows.map((r) => [r.easy_defend, r.possible_defend, r.hard_defend]),
-    ).toEqual([
-      [0, 0, 1],
-      [0, 0, 1],
-      [0, 1, 0],
-    ]);
     expect(view.rows[2].bss_public).toBe(1500);
     expect(view.rows[2].bs_estimate_human).toBe("1.5k");
-  });
-
-  test("follows the FF settings without reselecting", () => {
-    const opponents = [new FairFightScore("Yuri", "12", 1000, 750, "750")];
-    const faction = [member(2, "Bob", opponents)];
-
-    const [row] = memberView(faction, 2, {
-      easyFFMax: 3.5,
-      possibleFFMax: 4.0,
-    }).rows;
-
-    expect([row.easy_attack, row.possible_attack]).toEqual([1, 0]);
   });
 
   test("shows nothing selected when the selected member is no longer in the faction", () => {
     const faction = [member(1, "Alice"), member(2, "Bob")];
 
-    expect(memberView(faction, 99, LIMITS)).toEqual({ name: "", rows: [] });
-  });
-
-  test("opponents without a fair fight fall in no difficulty band", () => {
-    const opponents = [new FairFightScore("Nobody", "14", 1000, null, null)];
-    const faction = [member(2, "Bob", opponents)];
-
-    const [row] = memberView(faction, 2, LIMITS).rows;
-
-    expect(row.attacker_ff).toBeNull();
-    expect([
-      row.easy_attack,
-      row.possible_attack,
-      row.hard_attack,
-      row.easy_defend,
-      row.possible_defend,
-      row.hard_defend,
-    ]).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(memberView(faction, 99)).toEqual({ name: "", rows: [] });
   });
 });

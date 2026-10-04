@@ -67,12 +67,6 @@ export interface DrillDownData {
   defender_ff: number | null;
   attacker_ff_str: string | null;
   defender_ff_str: string | null;
-  easy_attack: number;
-  possible_attack: number;
-  hard_attack: number;
-  easy_defend: number;
-  possible_defend: number;
-  hard_defend: number;
 }
 
 export interface GraphData {

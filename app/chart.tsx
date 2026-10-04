@@ -291,12 +291,12 @@ export function MyChart({
   );
 
   const { name: leftNameSelected, rows: leftSelected } = useMemo(
-    () => memberView(left_data, leftSelectedId, { easyFFMax, possibleFFMax }),
-    [left_data, leftSelectedId, easyFFMax, possibleFFMax],
+    () => memberView(left_data, leftSelectedId),
+    [left_data, leftSelectedId],
   );
   const { name: rightNameSelected, rows: rightSelected } = useMemo(
-    () => memberView(right_data, rightSelectedId, { easyFFMax, possibleFFMax }),
-    [right_data, rightSelectedId, easyFFMax, possibleFFMax],
+    () => memberView(right_data, rightSelectedId),
+    [right_data, rightSelectedId],
   );
 
   function InnerMemberChartContainer({
