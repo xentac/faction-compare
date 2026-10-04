@@ -98,3 +98,52 @@ export function stepPin(pin: Pin, axes: PinAxes, step: PinStep): Pin {
 export function closePin(): Pin {
   return null;
 }
+
+// The axes with, for every attacker, which defenders are their targets:
+// cells[attacker index][defender index]. A direction of the war is one.
+export interface PinTargets extends PinAxes {
+  cells: readonly (readonly { isTarget: boolean }[])[];
+}
+
+// Following a selection made elsewhere: the pin moves to the newly selected
+// attacker's column.
+export function followSelection(
+  pin: Pin,
+  targets: PinTargets,
+  selectedId: number | null,
+): Pin {
+  if (!pin || selectedId == null) {
+    return null;
+  }
+  if (selectedId === pin.attackerId) {
+    return pin;
+  }
+  const attacker = targets.attackers.findIndex((m) => m.id === selectedId);
+  if (attacker < 0) {
+    return null;
+  }
+  const defender = targets.defenders.findIndex((m) => m.id === pin.defenderId);
+  // The target nearest the pinned defender along the axis: the defender
+  // themselves when they are a target, otherwise the near end of the run.
+  let nearest = -1;
+  targets.cells[attacker].forEach((cell, d) => {
+    if (
+      cell.isTarget &&
+      (nearest < 0 || Math.abs(d - defender) < Math.abs(nearest - defender))
+    ) {
+      nearest = d;
+    }
+  });
+  return {
+    attackerId: selectedId,
+    defenderId: nearest < 0 ? pin.defenderId : targets.defenders[nearest].id,
+  };
+}
+
+// Holding on when the axes change under the pin, by a target range change or
+// a reload of the factions: the pin stays on its two members wherever they
+// now sit, and does not move to a target. It closes when either member is no
+// longer on the axes.
+export function holdPin(pin: Pin, axes: PinAxes): Pin {
+  return pinnedCellIndex(pin, axes) ? pin : null;
+}
