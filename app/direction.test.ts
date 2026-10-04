@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { buildDirection, Direction } from "./direction";
+import {
+  buildDirection,
+  Direction,
+  estimateTimeToHits,
+  formatDuration,
+  WaitEstimate,
+} from "./direction";
 import { buildFactionData } from "./faction-data";
 import { FFScouterResult, TornFactionBasicApi } from "./types";
 
@@ -242,5 +248,142 @@ describe("axes", () => {
     }
     const unscouted = d.attackers.findIndex((m) => m.name === "Unscouted");
     expect(d.cells[unscouted].every((c) => c.fairFight == null)).toBe(true);
+  });
+});
+
+describe("time formatting", () => {
+  test("under an hour is minutes alone", () => {
+    expect(formatDuration(45)).toBe("45m");
+    expect(formatDuration(0)).toBe("0m");
+  });
+
+  test("hours and minutes", () => {
+    expect(formatDuration(320)).toBe("5h 20m");
+  });
+
+  test("whole hours drop the minutes", () => {
+    expect(formatDuration(300)).toBe("5h");
+  });
+
+  test("a day or more is days and hours", () => {
+    expect(formatDuration(27 * 60)).toBe("1d 3h");
+  });
+
+  test("a fraction of a minute is rounded before the units are split", () => {
+    expect(formatDuration(59.7)).toBe("1h");
+  });
+});
+
+describe("time-to-hits estimate", () => {
+  // The named attacker's estimate when defenders serve their full stay.
+  function waitOf(d: Direction, hitGoal: number, name: string): WaitEstimate {
+    const a = d.attackers.findIndex((m) => m.name === name);
+    return estimateTimeToHits(d, hitGoal).attackers[a].fullStays;
+  }
+
+  // Alice (1000) alone has three targets: 2.0, 2.33 and 3.0.
+  const threeTargets = faction("Theirs", [
+    { id: 11, name: "One", estimate: 375 },
+    { id: 12, name: "Two", estimate: 500 },
+    { id: 13, name: "Three", estimate: 750 },
+  ]);
+
+  test("an attacker with enough uncontested targets waits zero", () => {
+    const d = direction(alice, threeTargets);
+    expect(waitOf(d, 3, "Alice")).toEqual({
+      kind: "time",
+      p10: 0,
+      median: 0,
+      p90: 0,
+    });
+  });
+
+  test("an attacker with no targets never reaches the hit goal", () => {
+    const tooStrong = faction("Theirs", [
+      { id: 11, name: "Five", estimate: 1500 },
+    ]);
+    expect(waitOf(direction(alice, tooStrong), 20, "Alice")).toEqual({
+      kind: "never",
+    });
+  });
+
+  test("an attacker with no battle score estimate has no estimate", () => {
+    const ours = faction("Ours", [
+      { id: 1, name: "Alice", estimate: 1000 },
+      { id: 2, name: "Unscouted", estimate: null },
+    ]);
+    const d = direction(ours, threeTargets);
+    expect(waitOf(d, 20, "Unscouted")).toEqual({ kind: "none" });
+  });
+
+  test("the estimate carries the hit goal and one entry per attacker", () => {
+    const d = direction(alice, threeTargets);
+    const estimate = estimateTimeToHits(d, 7);
+    expect(estimate.hitGoal).toBe(7);
+    expect(estimate.attackers).toHaveLength(d.attackers.length);
+  });
+
+  test("a single attacker with a single target waits out the stays between their hits", () => {
+    const oneTarget = faction("Theirs", [
+      { id: 11, name: "Three", estimate: 750 },
+    ]);
+    const d = direction(alice, oneTarget);
+    // The first hit lands at t = 0, so a goal of 5 takes four stays of 15 to
+    // 30 minutes.
+    const wait = waitOf(d, 5, "Alice");
+    if (wait.kind !== "time") {
+      throw new Error("expected a time");
+    }
+    expect(wait.p10).toBeGreaterThanOrEqual(4 * 15);
+    expect(wait.p90).toBeLessThanOrEqual(4 * 30);
+    expect(wait.p90).toBeGreaterThan(wait.p10);
+    expect(waitOf(d, 1, "Alice")).toMatchObject({ kind: "time", median: 0 });
+  });
+
+  // Alice and Bob share one target, Shared (3.0 for both). Carol has a
+  // target of her own, Alone (3.0 for her, 1.2 for the others); Shared is 21
+  // for Carol.
+  const contested = direction(
+    faction("Ours", [
+      { id: 1, name: "Alice", estimate: 1000 },
+      { id: 2, name: "Bob", estimate: 1000 },
+      { id: 3, name: "Carol", estimate: 100 },
+    ]),
+    faction("Theirs", [
+      { id: 11, name: "Shared", estimate: 750 },
+      { id: 12, name: "Alone", estimate: 75 },
+    ]),
+  );
+
+  test("a contested attacker waits longer than an uncontested one", () => {
+    const alice = waitOf(contested, 5, "Alice");
+    const bob = waitOf(contested, 5, "Bob");
+    const carol = waitOf(contested, 5, "Carol");
+    if (alice.kind !== "time" || bob.kind !== "time" || carol.kind !== "time") {
+      throw new Error("expected times");
+    }
+    expect(alice.median).toBeGreaterThan(carol.median);
+    expect(bob.median).toBeGreaterThan(carol.median);
+    // Carol is in the single attacker, single target position.
+    expect(carol.p90).toBeLessThanOrEqual(4 * 30);
+    // Between them Alice and Bob need ten hits on Shared, so the slower of
+    // the two can take up to nine stays.
+    expect(alice.p90).toBeLessThanOrEqual(9 * 30);
+  });
+
+  test("the 10th percentile, the median and the 90th percentile are in order", () => {
+    for (const { fullStays } of estimateTimeToHits(contested, 5).attackers) {
+      if (fullStays.kind !== "time") {
+        throw new Error("expected a time");
+      }
+      expect(fullStays.p10).toBeLessThanOrEqual(fullStays.median);
+      expect(fullStays.median).toBeLessThanOrEqual(fullStays.p90);
+    }
+  });
+
+  test("the same direction and hit goal give the same numbers", () => {
+    expect(estimateTimeToHits(contested, 5)).toEqual(
+      estimateTimeToHits(contested, 5),
+    );
   });
 });
