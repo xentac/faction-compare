@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { fitName } from "./axis-names";
-import { Direction, TimeToHits } from "./direction";
+import { Direction, TimeToHits, WaitEstimate } from "./direction";
 import { NAME_FORMS, NARROW_BELOW, useMeasuredWidth } from "./target-heatmap";
 import { useTextMeasure } from "./use-text-measure";
 
@@ -17,7 +17,26 @@ const RIGHT_ROOM = 14;
 // The time axis covers at least this many minutes, so a chart of short waits
 // does not stretch a few minutes across the card.
 const SHORTEST_AXIS = 60;
-const DOT_RADIUS = 3;
+const DOT_RADIUS = 2.5;
+// Each row has two lanes, one per case: full stays this far above the middle
+// of the row, the med-out case this far below.
+const LANE_OFFSET = 3;
+const HOLLOW_STROKE = 1.25;
+// The two cases of the estimate, in the order they are drawn and explained.
+const CASES = [
+  {
+    key: "fullStays",
+    hollow: false,
+    lane: -LANE_OFFSET,
+    legend: "defenders serve full stays",
+  },
+  {
+    key: "medOut",
+    hollow: true,
+    lane: LANE_OFFSET,
+    legend: "defenders med out",
+  },
+] as const;
 // Where the words of a row with no time start, from the left of the plot.
 const WORDS_INSET = 4;
 
@@ -69,31 +88,70 @@ export function axisTicks(minutes: number, width: number): number[] {
 // The longest time on the chart, in minutes: where the time axis ends.
 function longestTime(estimate: TimeToHits): number {
   let longest = SHORTEST_AXIS;
-  for (const { fullStays } of estimate.attackers) {
-    if (fullStays.kind === "time") {
-      longest = Math.max(longest, fullStays.p90);
+  for (const attacker of estimate.attackers) {
+    for (const { key } of CASES) {
+      const wait = attacker[key];
+      if (wait.kind === "time") {
+        longest = Math.max(longest, wait.p90);
+      }
     }
   }
   return longest;
 }
 
+// One case's mark: a line from the 10th to the 90th percentile and a dot at
+// the median, filled for full stays and hollow for the med-out case. The x
+// positions are in pixels.
+function WaitMark({
+  p10,
+  median,
+  p90,
+  y,
+  hollow,
+}: {
+  p10: number;
+  median: number;
+  p90: number;
+  y: number;
+  hollow: boolean;
+}) {
+  return (
+    <>
+      <line
+        x1={p10}
+        x2={p90}
+        y1={y}
+        y2={y}
+        strokeWidth={1.5}
+        className="stroke-foreground/50"
+      />
+      {hollow ? (
+        <circle
+          cx={median}
+          cy={y}
+          r={DOT_RADIUS - HOLLOW_STROKE / 2}
+          strokeWidth={HOLLOW_STROKE}
+          className="fill-card stroke-foreground"
+        />
+      ) : (
+        <circle cx={median} cy={y} r={DOT_RADIUS} className="fill-foreground" />
+      )}
+    </>
+  );
+}
+
 function RankedLegend() {
   return (
     <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-      <span className="flex items-center gap-x-1.5">
-        <svg width={26} height={10} aria-hidden="true">
-          <line
-            x1={1}
-            x2={25}
-            y1={5}
-            y2={5}
-            strokeWidth={1.5}
-            className="stroke-foreground/50"
-          />
-          <circle cx={13} cy={5} r={DOT_RADIUS} className="fill-foreground" />
-        </svg>
-        <span>median wait for targets, with the 10th to 90th percentile</span>
-      </span>
+      <span>median wait for targets, with the 10th to 90th percentile:</span>
+      {CASES.map(({ key, hollow, legend }) => (
+        <span key={key} className="flex items-center gap-x-1.5">
+          <svg width={26} height={10} aria-hidden="true">
+            <WaitMark p10={1} median={13} p90={25} y={5} hollow={hollow} />
+          </svg>
+          <span>{legend}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -197,7 +255,10 @@ export function RankedChart({
               <g transform={`translate(0 ${AXIS_HEIGHT})`}>
                 {rows.map(({ attacker, index }, row) => {
                   const y = row * ROW_HEIGHT + ROW_HEIGHT / 2;
-                  const wait = shown?.attackers[index].fullStays;
+                  const waits = shown?.attackers[index];
+                  // Whether there is a time at all is the same in both
+                  // cases, so the words are written once.
+                  const kind = waits?.fullStays.kind;
                   return (
                     <g key={attacker.id}>
                       {names && (
@@ -211,25 +272,23 @@ export function RankedChart({
                           {names[row]}
                         </text>
                       )}
-                      {wait?.kind === "time" && (
-                        <>
-                          <line
-                            x1={x(wait.p10)}
-                            x2={x(wait.p90)}
-                            y1={y}
-                            y2={y}
-                            strokeWidth={1.5}
-                            className="stroke-foreground/50"
-                          />
-                          <circle
-                            cx={x(wait.median)}
-                            cy={y}
-                            r={DOT_RADIUS}
-                            className="fill-foreground"
-                          />
-                        </>
-                      )}
-                      {wait?.kind === "never" && (
+                      {waits &&
+                        CASES.map(({ key, hollow, lane }) => {
+                          const wait: WaitEstimate = waits[key];
+                          return (
+                            wait.kind === "time" && (
+                              <WaitMark
+                                key={key}
+                                p10={x(wait.p10)}
+                                median={x(wait.median)}
+                                p90={x(wait.p90)}
+                                y={y + lane}
+                                hollow={hollow}
+                              />
+                            )
+                          );
+                        })}
+                      {kind === "never" && (
                         <text
                           x={WORDS_INSET}
                           y={y}
@@ -239,7 +298,7 @@ export function RankedChart({
                           never (no targets)
                         </text>
                       )}
-                      {wait?.kind === "none" && (
+                      {kind === "none" && (
                         <text
                           x={WORDS_INSET}
                           y={y}

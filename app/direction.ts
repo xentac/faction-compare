@@ -157,6 +157,9 @@ export type WaitEstimate =
 export interface AttackerTimeToHits {
   // The case where every defender serves their full hospital stay.
   fullStays: WaitEstimate;
+  // The case where every defender meds out while their medical cooldown
+  // allows it.
+  medOut: WaitEstimate;
 }
 
 export interface TimeToHits {
@@ -193,6 +196,50 @@ type HospitalCase = (
 
 const fullStays: HospitalCase = () => (_defender, _time, random) =>
   STAY_MINIMUM + random() * (STAY_MAXIMUM - STAY_MINIMUM);
+
+// How long after a hit a defender meds out, in minutes.
+const REACTION_MINIMUM = 1;
+const REACTION_MAXIMUM = 5;
+
+// The medical cooldown one med out adds and the most a defender can carry,
+// in minutes.
+const MED_OUT_COOLDOWN = 10;
+const COOLDOWN_CAP = 6 * 60;
+// A defender stopped by the cap meds out again once their cooldown is under
+// this many minutes.
+const RESUME_BELOW = 30;
+
+// Every defender meds out on being hit, a reaction delay after the hit, which
+// clears the rest of the stay. They do so on every hit while it keeps their
+// medical cooldown under the cap; once it would not, they serve full stays
+// until the cooldown has decayed to under RESUME_BELOW, then resume. The
+// cooldown is looked at when the defender is hit. Everyone starts at zero
+// cooldown; it decays one minute per minute.
+const medOut: HospitalCase = (defenderCount) => {
+  // Each defender's cooldown as it was at the time of their last hit.
+  const cooldown = new Float64Array(defenderCount);
+  const cooldownAt = new Float64Array(defenderCount);
+  // Defenders who hit the cap and are serving full stays.
+  const resting = new Uint8Array(defenderCount);
+  const serveFullStay = fullStays(defenderCount);
+  return (defender, time, random) => {
+    const now = Math.max(0, cooldown[defender] - (time - cooldownAt[defender]));
+    cooldown[defender] = now;
+    cooldownAt[defender] = time;
+    if (resting[defender]) {
+      if (now < RESUME_BELOW) {
+        resting[defender] = 0;
+      }
+    } else if (now + MED_OUT_COOLDOWN > COOLDOWN_CAP) {
+      resting[defender] = 1;
+    }
+    if (resting[defender]) {
+      return serveFullStay(defender, time, random);
+    }
+    cooldown[defender] = now + MED_OUT_COOLDOWN;
+    return REACTION_MINIMUM + random() * (REACTION_MAXIMUM - REACTION_MINIMUM);
+  };
+};
 
 // One run of the war. Fills `reached` with the time of each attacker's
 // goal-reaching hit; an attacker with no targets is left untouched.
@@ -300,9 +347,13 @@ export function estimateTimeToHits(
   // depend on which other cases are computed.
   const goal = Math.max(1, Math.floor(hitGoal));
   const full = estimateCase(direction, goal, fullStays);
+  const med = estimateCase(direction, goal, medOut);
   return {
     hitGoal,
-    attackers: direction.attackers.map((_, a) => ({ fullStays: full[a] })),
+    attackers: direction.attackers.map((_, a) => ({
+      fullStays: full[a],
+      medOut: med[a],
+    })),
   };
 }
 
