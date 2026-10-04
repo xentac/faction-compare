@@ -350,7 +350,7 @@ function guidePath(g: PlotGeometry): string {
 
 // The width of an element's content box and the device pixel ratio, kept up
 // to date as either changes. Width is 0 until first measured.
-function useMeasuredWidth<T extends Element>() {
+export function useMeasuredWidth<T extends Element>() {
   const ref = useRef<T>(null);
   const [measured, setMeasured] = useState({ width: 0, devicePixelRatio: 1 });
   useLayoutEffect(() => {

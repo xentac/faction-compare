@@ -38,6 +38,8 @@ import { memberView } from "./member-view";
 import { buildDirection } from "./direction";
 import { Pin } from "./pinned-cell";
 import { TargetHeatmap } from "./target-heatmap";
+import { RankedChart } from "./ranked-chart";
+import { useTimeToHits } from "./use-time-to-hits";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import z from "zod";
@@ -182,6 +184,8 @@ export function MyChart({
   const [easyFFMax, setEasyFFMax] = useState<number>(2.5);
   const [possibleFFMax, setPossibleFFMax] = useState<number>(4.0);
   const [minimumFFTarget, setMinimumFFTarget] = useState<number>(1.75);
+  const [hitGoal, setHitGoal] = useState<number>(20);
+  const [tab, setTab] = useState("faction_charts");
 
   function handleChartClick(select: (id: number) => void) {
     return function (nextState: CategoricalChartState) {
@@ -257,6 +261,17 @@ export function MyChart({
     ],
   );
 
+  // The time-to-hits estimate of each direction, null while it is computed.
+  // Held here, above the tabs, so that leaving and re-entering the Faction
+  // Charts tab does not recompute it.
+  const onFactionCharts = tab === "faction_charts";
+  const leftTimeToHits = useTimeToHits(leftDirection, hitGoal, onFactionCharts);
+  const rightTimeToHits = useTimeToHits(
+    rightDirection,
+    hitGoal,
+    onFactionCharts,
+  );
+
   const { name: leftNameSelected, rows: leftSelected } = useMemo(
     () => memberView(left_data, leftSelectedId, { easyFFMax, possibleFFMax }),
     [left_data, leftSelectedId, easyFFMax, possibleFFMax],
@@ -316,6 +331,7 @@ export function MyChart({
     easy_ff_max: z.coerce.number<number>(),
     possible_ff_max: z.coerce.number<number>(),
     minimum_ff_target: z.coerce.number<number>(),
+    hit_goal: z.coerce.number<number>().int().min(1),
   });
 
   const form = useForm<z.infer<typeof formSchema>>({
@@ -324,6 +340,7 @@ export function MyChart({
       easy_ff_max: 2.5,
       possible_ff_max: 4.0,
       minimum_ff_target: 1.75,
+      hit_goal: 20,
     },
   });
 
@@ -336,8 +353,11 @@ export function MyChart({
           <Card className="mt-5 mx-5">
             <CardHeader>
               <div className="flex flex-col gap-1.5">
-                <CardTitle>Change FF limits</CardTitle>
-                <CardDescription>Set FF ranges for graphs</CardDescription>
+                <CardTitle>Settings</CardTitle>
+                <CardDescription>
+                  FF ranges for the charts and the hit goal for the time-to-hits
+                  estimate
+                </CardDescription>
               </div>
               <CollapsibleTrigger asChild data-slot="card-action">
                 <Button variant="ghost" size="icon" className="size-8">
@@ -356,6 +376,7 @@ export function MyChart({
                         setEasyFFMax(values.easy_ff_max || 2.5);
                         setPossibleFFMax(values.possible_ff_max || 4.0);
                         setMinimumFFTarget(values.minimum_ff_target || 1.75);
+                        setHitGoal(values.hit_goal || 20);
                       },
                     )}
                     className="space-y-8"
@@ -391,10 +412,23 @@ export function MyChart({
                         control={form.control}
                         name="minimum_ff_target"
                         render={({ field }) => (
-                          <FormItem className="md:flex-1 mt-5 md:mt-0 md:ml-2.5">
+                          <FormItem className="md:flex-1 mt-5 md:mt-0 md:mx-2.5">
                             <FormLabel>Minimum FF Target</FormLabel>
                             <FormControl>
                               <Input placeholder="1.75" {...field} />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name="hit_goal"
+                        render={({ field }) => (
+                          <FormItem className="md:flex-1 mt-5 md:mt-0 md:ml-2.5">
+                            <FormLabel>Hit Goal</FormLabel>
+                            <FormControl>
+                              <Input placeholder="20" {...field} />
                             </FormControl>
                             <FormMessage />
                           </FormItem>
@@ -409,7 +443,7 @@ export function MyChart({
           </Card>
         </Collapsible>
       </div>
-      <Tabs defaultValue="faction_charts">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="mt-5 mx-5">
           <TabsTrigger value="faction_charts">Faction Charts</TabsTrigger>
           <TabsTrigger value="faction_data">Data</TabsTrigger>
@@ -468,36 +502,68 @@ export function MyChart({
               />
             </CardContent>
           </Card>
-          <Card className="col-span-2 lg:col-span-1">
-            <CardHeader>
-              <CardTitle>
-                Target heatmap ({leftfactionbasic.name} attacking)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <TargetHeatmap
-                direction={leftDirection}
-                pin={leftPin}
-                onPinChange={setLeftPin}
-                onSelectAttacker={setLeftSelectedId}
-              />
-            </CardContent>
-          </Card>
-          <Card className="col-span-2 lg:col-span-1">
-            <CardHeader>
-              <CardTitle>
-                Target heatmap ({rightfactionbasic.name} attacking)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <TargetHeatmap
-                direction={rightDirection}
-                pin={rightPin}
-                onPinChange={setRightPin}
-                onSelectAttacker={setRightSelectedId}
-              />
-            </CardContent>
-          </Card>
+          {/* One column per direction: its heatmap with its ranked chart
+              directly below, also when the columns are stacked. */}
+          <div className="col-span-2 flex flex-col gap-5 lg:col-span-1">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Target heatmap ({leftfactionbasic.name} attacking)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TargetHeatmap
+                  direction={leftDirection}
+                  pin={leftPin}
+                  onPinChange={setLeftPin}
+                  onSelectAttacker={setLeftSelectedId}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Time to {hitGoal} hits for {leftfactionbasic.name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RankedChart
+                  direction={leftDirection}
+                  estimate={leftTimeToHits}
+                />
+              </CardContent>
+            </Card>
+          </div>
+          <div className="col-span-2 flex flex-col gap-5 lg:col-span-1">
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Target heatmap ({rightfactionbasic.name} attacking)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TargetHeatmap
+                  direction={rightDirection}
+                  pin={rightPin}
+                  onPinChange={setRightPin}
+                  onSelectAttacker={setRightSelectedId}
+                />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Time to {hitGoal} hits for {rightfactionbasic.name}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <RankedChart
+                  direction={rightDirection}
+                  estimate={rightTimeToHits}
+                />
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
         <TabsContent
           value="faction_data"
