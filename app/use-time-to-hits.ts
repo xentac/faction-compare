@@ -4,7 +4,7 @@ import type { TimeToHitsRequest } from "./time-to-hits.worker";
 
 // Computes one estimate off the render path and hands it to `done`. Returns
 // a function that abandons the computation.
-function computeTimeToHits(
+export function computeTimeToHits(
   direction: Direction,
   hitGoal: number,
   done: (estimate: TimeToHits) => void,
@@ -13,10 +13,14 @@ function computeTimeToHits(
   let worker: Worker | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Without a working worker the estimate is computed on the page's thread,
-  // after the browser has had the chance to paint.
+  // after the browser has had the chance to paint. At most once, however
+  // often the worker reports an error.
   const computeHere = () => {
     worker?.terminate();
     worker = null;
+    if (abandoned || timer != null) {
+      return;
+    }
     timer = setTimeout(() => {
       if (!abandoned) {
         done(estimateTimeToHits(direction, hitGoal));

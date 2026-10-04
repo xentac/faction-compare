@@ -49,12 +49,12 @@ export function buildFactionData(
     let member_number = 0;
     return (value: FFScouterJson): GraphData => {
       member_number++;
-      const member: TornMemberApi =
+      const member: TornMemberApi | undefined =
         primaryfaction.members["" + value.player_id];
       const opponent_scores = opponent.map(
         (enemy) =>
           new FairFightScore(
-            opponentfaction.members["" + enemy.player_id].name,
+            opponentfaction.members["" + enemy.player_id]?.name ?? "Unknown",
             "" + enemy.player_id,
             value.bss_public,
             enemy.bss_public,
@@ -132,10 +132,10 @@ export function buildFactionData(
 
   const no_unavailable = (faction: TornFactionBasicApi) => {
     return (item: FFScouterJson) => {
-      const member = faction.members["" + item.player_id];
-      return (
-        member.status.state != "Fallen" && member.status.state != "Federal"
-      );
+      // A scouted player who is not in the member list has no known state
+      // and counts as available, as on the target heatmap.
+      const state = faction.members["" + item.player_id]?.status.state;
+      return state != "Fallen" && state != "Federal";
     };
   };
 

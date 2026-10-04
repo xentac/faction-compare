@@ -2,7 +2,9 @@ import {
   KeyboardEvent,
   PointerEvent,
   ReactNode,
+  Ref,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -769,16 +771,21 @@ function HoverTooltip({
 
 // The panel of the pinned cell, directly below the plot: the step buttons and
 // the close button in a row that stays put, then the cell's detail rows.
+// `onKeyDown` hears the keys pressed while focus is on one of its buttons.
 function PinPanel({
+  ref,
   rows,
   canStep,
   onStep,
   onClose,
+  onKeyDown,
 }: {
+  ref: Ref<HTMLDivElement>;
   rows: DetailRow[];
   canStep: (step: PinStep) => boolean;
   onStep: (step: PinStep) => void;
   onClose: () => void;
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
 }) {
   const stepButton = (step: PinStep, label: string, icon: ReactNode) => (
     <Button
@@ -796,8 +803,10 @@ function PinPanel({
   );
   return (
     <div
+      ref={ref}
       role="group"
       aria-label="Pinned cell"
+      onKeyDown={onKeyDown}
       className="mt-3 flex flex-col gap-3 rounded-lg border p-3 text-xs"
     >
       <div className="flex items-start gap-x-2">
@@ -1061,9 +1070,31 @@ export function TargetHeatmap({
     [direction, pinAttacker, pinDefender, hitGoal, timeToHits],
   );
 
-  // The keys of the focused plot: the arrows step the pin, or place it when
-  // nothing is pinned, and Escape closes it. Focus stays on the plot
-  // throughout. An arrow never scrolls the page, even at the end of an axis.
+  // Closing the pin takes the panel away, and with it any focus on one of
+  // its buttons: focus goes to the plot, so the keys keep working.
+  const closePanel = useCallback(() => {
+    onPinChange(closePin());
+    containerRef.current?.focus();
+  }, [containerRef, onPinChange]);
+  // A step button that has focus when its step runs out is disabled and hears
+  // no more keys: focus goes to the plot.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const focused = document.activeElement;
+    if (
+      focused instanceof HTMLButtonElement &&
+      focused.disabled &&
+      panelRef.current?.contains(focused)
+    ) {
+      containerRef.current?.focus();
+    }
+  }, [containerRef, pin, direction]);
+
+  // The keys of this heatmap, heard while focus is on the plot or inside the
+  // panel: the arrows step the pin, or place it when nothing is pinned, and
+  // Escape closes it. Focus stays where it is, except where the above moves
+  // it to the plot. An arrow never scrolls the page, even at the end of an
+  // axis.
   const pressKey = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
@@ -1071,7 +1102,7 @@ export function TargetHeatmap({
       }
       if (event.key === "Escape") {
         if (pin) {
-          onPinChange(closePin());
+          closePanel();
         }
         return;
       }
@@ -1096,6 +1127,7 @@ export function TargetHeatmap({
       pin,
       pinCell,
       movePin,
+      closePanel,
       onPinChange,
       onSelectAttacker,
     ],
@@ -1105,7 +1137,8 @@ export function TargetHeatmap({
     <div>
       <HeatmapLegend direction={direction} counts={counts} />
       {/* The plot is the tab stop: a click on it focuses it too, so the arrow
-          keys work after a click on a cell. */}
+          keys work after a click on a cell. The panel's buttons are the tab
+          stops after it, and the same keys work from them. */}
       <div
         ref={containerRef}
         className="focus-visible:ring-ring/50 w-full rounded-sm outline-none focus-visible:ring-[3px]"
@@ -1194,10 +1227,12 @@ export function TargetHeatmap({
       </div>
       {pinRows && (
         <PinPanel
+          ref={panelRef}
           rows={pinRows}
           canStep={(step) => canStepPin(pin, direction, step)}
           onStep={(step) => movePin(stepPin(pin, direction, step))}
-          onClose={() => onPinChange(closePin())}
+          onClose={closePanel}
+          onKeyDown={pressKey}
         />
       )}
       {hover && hoverRows && (

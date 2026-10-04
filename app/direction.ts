@@ -47,6 +47,9 @@ export interface DirectionCell {
 }
 
 export const DIFFICULTY_STEPS = 5;
+// How far short of a span boundary, as a fraction of a span, still counts as
+// on it.
+const BOUNDARY_TOLERANCE = 1e-9;
 
 export interface Direction {
   targetRange: TargetRange;
@@ -73,8 +76,11 @@ export function fairFight(
 // The difficulty step of a fair fight inside the target range: the range is
 // cut into DIFFICULTY_STEPS equal spans, each including its lower end.
 function difficultyStep(ff: number, { minimum, maximum }: TargetRange): number {
+  // A fair fight on a boundary can come out a hair under it in floating
+  // point; anything this close to the next span belongs to it.
   const step = Math.floor(
-    ((ff - minimum) / (maximum - minimum)) * DIFFICULTY_STEPS,
+    ((ff - minimum) / (maximum - minimum)) * DIFFICULTY_STEPS +
+      BOUNDARY_TOLERANCE,
   );
   return Math.min(Math.max(step, 0), DIFFICULTY_STEPS - 1);
 }
@@ -215,7 +221,7 @@ const RESUME_BELOW = 30;
 // until the cooldown has decayed to under RESUME_BELOW, then resume. The
 // cooldown is looked at when the defender is hit. Everyone starts at zero
 // cooldown; it decays one minute per minute.
-const medOut: HospitalCase = (defenderCount) => {
+export const medOut: HospitalCase = (defenderCount) => {
   // Each defender's cooldown as it was at the time of their last hit.
   const cooldown = new Float64Array(defenderCount);
   const cooldownAt = new Float64Array(defenderCount);
@@ -230,7 +236,7 @@ const medOut: HospitalCase = (defenderCount) => {
       if (now < RESUME_BELOW) {
         resting[defender] = 0;
       }
-    } else if (now + MED_OUT_COOLDOWN > COOLDOWN_CAP) {
+    } else if (now + MED_OUT_COOLDOWN >= COOLDOWN_CAP) {
       resting[defender] = 1;
     }
     if (resting[defender]) {
@@ -291,6 +297,16 @@ function runWar(
   }
 }
 
+// A percentile of samples sorted ascending, by nearest rank: the smallest
+// sample with at least that percentage of the samples at or below it.
+export function nearestRank(
+  sorted: ArrayLike<number>,
+  percentage: number,
+): number {
+  const rank = Math.ceil((percentage * sorted.length) / 100) - 1;
+  return sorted[Math.min(Math.max(rank, 0), sorted.length - 1)];
+}
+
 // Every attacker's estimate in one case.
 function estimateCase(
   direction: Direction,
@@ -325,13 +341,11 @@ function estimateCase(
       return { kind: "never" };
     }
     const sorted = samples[a].sort();
-    const percentile = (p: number) =>
-      sorted[Math.min(Math.floor(p * ESTIMATE_RUNS), ESTIMATE_RUNS - 1)];
     return {
       kind: "time",
-      p10: percentile(0.1),
-      median: percentile(0.5),
-      p90: percentile(0.9),
+      p10: nearestRank(sorted, 10),
+      median: nearestRank(sorted, 50),
+      p90: nearestRank(sorted, 90),
     };
   });
 }

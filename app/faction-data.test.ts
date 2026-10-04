@@ -124,3 +124,30 @@ describe("Unavailable members", () => {
     expect(right_data.map((m) => m.number)).toEqual([1, 2]);
   });
 });
+
+describe("A scouted player missing from the faction's member list", () => {
+  // Stray has a battle score estimate but is not among the faction's members.
+  const withStray = faction("Theirs", [
+    { id: 11, name: "Two", estimate: 375 },
+    { id: 12, name: "Three", estimate: 750 },
+  ]);
+  withStray.estimates.push({
+    player_id: 99,
+    fair_fight: null,
+    bs_estimate: null,
+    bs_estimate_human: null,
+    bss_public: 750,
+    last_updated: null,
+  });
+
+  test("is kept, as on the target heatmap, under the name Unknown", () => {
+    const { left_data, right_data } = build(ours, withStray);
+    expect(right_data.map((m) => m.name)).toEqual(["Two", "Three", "Unknown"]);
+    expect(left_data[0].opponent_scores.map((o) => o.name)).toEqual([
+      "Two",
+      "Three",
+      "Unknown",
+    ]);
+    expect(left_data[0].targets_attacks_count).toBe(3);
+  });
+});

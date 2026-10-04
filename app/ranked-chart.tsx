@@ -441,7 +441,13 @@ export function RankedChart({
                     <g
                       key={attacker.id}
                       className="cursor-pointer"
-                      onPointerEnter={() => setHovered(attacker.id)}
+                      // Hover is for a mouse only: a tapped row would
+                      // otherwise stay highlighted. A tap still selects.
+                      onPointerEnter={(event) =>
+                        setHovered(
+                          event.pointerType === "mouse" ? attacker.id : null,
+                        )
+                      }
                       onClick={() => onSelectAttacker?.(attacker.id)}
                     >
                       {/* The highlight, and at rest the row's hit area. */}
