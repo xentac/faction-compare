@@ -1,5 +1,8 @@
 import {
   AttackerTimeToHits,
+  CellIndex,
+  COMPUTING_WORDS,
+  currentEstimate,
   Direction,
   DirectionMember,
   formatWait,
@@ -31,12 +34,13 @@ export interface CellTimes {
   estimate: TimeToHits | null;
 }
 
-function targets(count: number): string {
+// An attacker's target count as the Attacker row words it.
+function wordTargetCount(count: number): string {
   return count === 1 ? "(1 target)" : `(${count} targets)`;
 }
 
 // A member's battle score estimate as the estimate's source words it.
-function estimate(member: DirectionMember): string {
+function wordEstimate(member: DirectionMember): string {
   if (member.estimate == null) {
     return "none";
   }
@@ -48,7 +52,7 @@ function estimate(member: DirectionMember): string {
 // hit goal in both cases.
 export function cellDetailRows(
   direction: Direction,
-  cell: { attacker: number; defender: number },
+  cell: CellIndex,
   times: CellTimes,
 ): DetailRow[] {
   const attacker = direction.attackers[cell.attacker];
@@ -76,19 +80,16 @@ export function cellDetailRows(
 
   // An estimate made for another hit goal or other attackers is not this
   // cell's: it counts as still being computed.
-  const current =
-    times.estimate != null &&
-    times.estimate.hitGoal === times.hitGoal &&
-    times.estimate.attackers.length === direction.attackers.length;
-  const waits = current ? times.estimate?.attackers[cell.attacker] : undefined;
+  const waits = currentEstimate(times.estimate, direction, times.hitGoal)
+    ?.attackers[cell.attacker];
   const wait = (key: keyof AttackerTimeToHits) =>
-    waits == null ? "computing…" : formatWait(waits[key]);
+    waits == null ? COMPUTING_WORDS : formatWait(waits[key]);
 
   return [
     {
       label: "Attacker",
       name: attacker.name,
-      value: targets(attacker.targetCount),
+      value: wordTargetCount(attacker.targetCount),
     },
     {
       label: "Defender",
@@ -96,8 +97,8 @@ export function cellDetailRows(
       value: `(shared by ${defender.shareCount})`,
     },
     fairFightRow,
-    { label: "Attacker estimate", value: estimate(attacker) },
-    { label: "Defender estimate", value: estimate(defender) },
+    { label: "Attacker estimate", value: wordEstimate(attacker) },
+    { label: "Defender estimate", value: wordEstimate(defender) },
     {
       label: `Time to ${times.hitGoal} hits`,
       value: wait("fullStays"),

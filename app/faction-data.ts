@@ -1,3 +1,4 @@
+import { isTarget, isUnavailable } from "./fair-fight";
 import {
   FairFightScore,
   FFScouterJson,
@@ -35,11 +36,13 @@ export function buildFactionData(
     }
     return a.bss_public - b.bss_public;
   };
-  // factions sorted by lower BSS to highest
+  // factions sorted by lowest battle score estimate to highest
   const sorted_left: FFScouterJson[] =
     leftffscouterdata.toSorted(sort_function);
   const sorted_right: FFScouterJson[] =
     rightffscouterdata.toSorted(sort_function);
+
+  const targetRange = { minimum: minimumFFTarget, maximum: possibleFFMax };
 
   const map_data = (
     primaryfaction: TornFactionBasicApi,
@@ -87,20 +90,13 @@ export function buildFactionData(
             value.defender_ff >= easyFFMax,
         ),
         hard_defends: opponent_scores.filter(
-          (value) =>
-            value.defender_ff != null && value.defender_ff < easyFFMax,
+          (value) => value.defender_ff != null && value.defender_ff < easyFFMax,
         ),
-        targets_attacks: opponent_scores.filter(
-          (value) =>
-            value.attacker_ff != null &&
-            value.attacker_ff >= minimumFFTarget &&
-            value.attacker_ff < possibleFFMax,
+        targets_attacks: opponent_scores.filter((value) =>
+          isTarget(value.attacker_ff, targetRange),
         ),
-        targets_defends: opponent_scores.filter(
-          (value) =>
-            value.defender_ff != null &&
-            value.defender_ff >= minimumFFTarget &&
-            value.defender_ff < possibleFFMax,
+        targets_defends: opponent_scores.filter((value) =>
+          isTarget(value.defender_ff, targetRange),
         ),
       };
       return {
@@ -130,20 +126,16 @@ export function buildFactionData(
     };
   };
 
+  // A scouted player who is not in the member list has no known state and
+  // counts as available, as on the target heatmap.
   const no_unavailable = (faction: TornFactionBasicApi) => {
-    return (item: FFScouterJson) => {
-      // A scouted player who is not in the member list has no known state
-      // and counts as available, as on the target heatmap.
-      const state = faction.members["" + item.player_id]?.status.state;
-      return state != "Fallen" && state != "Federal";
-    };
+    return (item: FFScouterJson) =>
+      !isUnavailable(faction.members["" + item.player_id]);
   };
 
   // Unavailable members are left out both as primary members and as opponents.
   const available_left = sorted_left.filter(no_unavailable(leftfactiondata));
-  const available_right = sorted_right.filter(
-    no_unavailable(rightfactiondata),
-  );
+  const available_right = sorted_right.filter(no_unavailable(rightfactiondata));
 
   const left_data: GraphData[] = available_left.map(
     map_data(leftfactiondata, rightfactiondata, available_right),

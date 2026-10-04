@@ -21,10 +21,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { fitName, labelEvery } from "./axis-names";
 import { cellDetailRows, DetailRow } from "./cell-details";
-import { DIFFICULTY_STEPS, Direction, TimeToHits } from "./direction";
+import { NAME_FORMS, nameLayout, useMeasuredWidth } from "./chart-layout";
+import {
+  CellIndex,
+  DIFFICULTY_STEPS,
+  Direction,
+  TimeToHits,
+} from "./direction";
 import {
   canStepPin,
-  closePin,
   firstArrowPin,
   Pin,
   pinnedCellIndex,
@@ -36,12 +41,6 @@ import { useTextMeasure } from "./use-text-measure";
 
 // The height of the cell area at every screen width.
 export const PLOT_HEIGHT = 500;
-// A card narrower than this gets the narrow layout.
-export const NARROW_BELOW = 480;
-// The forms a name is drawn in, each the leading part of a CSS font shorthand.
-// A name is measured at the widest of them, so its text is the same in every
-// state.
-export const NAME_FORMS = ["bold", "italic bold"];
 // The room one label needs along its axis; every nth name is shown so that
 // labels are at least this far apart.
 export const ATTACKER_LABEL_SPACING = 15;
@@ -87,12 +86,10 @@ export interface PlotLayout {
 }
 
 export function plotLayout(cardWidth: number): PlotLayout {
-  const narrow = cardWidth < NARROW_BELOW;
-  const fontSize = narrow ? 9 : 10;
-  // Both fit a 15-character bold name, except the defender names on a narrow
+  const { narrow, fontSize, attackerNameSpace } = nameLayout(cardWidth);
+  // Defender names get the same space as attacker names, except on a narrow
   // card, where plot width is scarce.
-  const attackerNameSpace = narrow ? 86 : 96;
-  const defenderNameSpace = narrow ? 66 : 96;
+  const defenderNameSpace = narrow ? 66 : attackerNameSpace;
   const targetBarLength = 28;
   const shareBarLength = narrow ? 22 : 34;
   return {
@@ -163,6 +160,11 @@ export interface PlotGeometry {
   rowEdges: number[];
 }
 
+// A length rounded to a whole device pixel.
+function snap(n: number, devicePixelRatio: number): number {
+  return Math.round(n * devicePixelRatio) / devicePixelRatio;
+}
+
 export function plotGeometry(
   attackerCount: number,
   defenderCount: number,
@@ -170,25 +172,41 @@ export function plotGeometry(
   height: number,
   devicePixelRatio: number,
 ): PlotGeometry {
-  const snap = (n: number) =>
-    Math.round(n * devicePixelRatio) / devicePixelRatio;
   const edges = (count: number, length: number) =>
-    Array.from({ length: count + 1 }, (_, i) => snap((i * length) / count));
+    Array.from({ length: count + 1 }, (_, i) =>
+      snap((i * length) / count, devicePixelRatio),
+    );
   return {
     width,
     height,
     columnEdges: attackerCount > 0 ? edges(attackerCount, width) : [],
     rowEdges:
       defenderCount > 0
-        ? edges(defenderCount, height).map((y) => snap(height) - y)
+        ? edges(defenderCount, height).map(
+            (y) => snap(height, devicePixelRatio) - y,
+          )
         : [],
   };
 }
 
-// One cell of the heatmap, as indexes into the direction's two axes.
-export interface CellIndex {
-  attacker: number;
-  defender: number;
+// The four edges of a cell in the plot's coordinates.
+function cellEdges(g: PlotGeometry, cell: CellIndex) {
+  return {
+    left: g.columnEdges[cell.attacker],
+    right: g.columnEdges[cell.attacker + 1],
+    bottom: g.rowEdges[cell.defender],
+    top: g.rowEdges[cell.defender + 1],
+  };
+}
+
+// The drawn length of an edge bar, on whole device pixels.
+function snappedBarLength(
+  count: number,
+  largest: number,
+  longest: number,
+  devicePixelRatio: number,
+): number {
+  return snap(edgeBarLength(count, largest, longest), devicePixelRatio);
 }
 
 // The index of the span holding a position, given the span edges in ascending
@@ -314,16 +332,13 @@ function edgeBarPaths(
   counts: LargestCounts,
   devicePixelRatio: number,
 ): { targets: string; shares: string } {
-  const snap = (n: number) =>
-    Math.round(n * devicePixelRatio) / devicePixelRatio;
   let targets = "";
   direction.attackers.forEach((attacker, a) => {
-    const length = snap(
-      edgeBarLength(
-        attacker.targetCount,
-        counts.targetCount,
-        layout.targetBarLength,
-      ),
+    const length = snappedBarLength(
+      attacker.targetCount,
+      counts.targetCount,
+      layout.targetBarLength,
+      devicePixelRatio,
     );
     if (length > 0) {
       targets += `M${g.columnEdges[a]} ${-BAR_GAP}H${g.columnEdges[a + 1]}v${-length}H${g.columnEdges[a]}Z`;
@@ -332,12 +347,11 @@ function edgeBarPaths(
   let shares = "";
   const left = g.width + BAR_GAP;
   direction.defenders.forEach((defender, d) => {
-    const length = snap(
-      edgeBarLength(
-        defender.shareCount,
-        counts.shareCount,
-        layout.shareBarLength,
-      ),
+    const length = snappedBarLength(
+      defender.shareCount,
+      counts.shareCount,
+      layout.shareBarLength,
+      devicePixelRatio,
     );
     if (length > 0) {
       shares += `M${left} ${g.rowEdges[d + 1]}h${length}V${g.rowEdges[d]}H${left}Z`;
@@ -356,40 +370,6 @@ function guidePath(g: PlotGeometry): string {
     d += `M0 ${g.rowEdges[j]}H${g.width}`;
   }
   return d;
-}
-
-// The width of an element's content box and the device pixel ratio, kept up
-// to date as either changes. Width is 0 until first measured.
-export function useMeasuredWidth<T extends Element>() {
-  const ref = useRef<T>(null);
-  const [measured, setMeasured] = useState({ width: 0, devicePixelRatio: 1 });
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) {
-      return;
-    }
-    const measure = () => {
-      const width = element.clientWidth;
-      const devicePixelRatio = window.devicePixelRatio || 1;
-      setMeasured((previous) =>
-        previous.width === width &&
-        previous.devicePixelRatio === devicePixelRatio
-          ? previous
-          : { width, devicePixelRatio },
-      );
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    // Zooming changes the device pixel ratio without always resizing the
-    // element.
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, []);
-  return [ref, measured] as const;
 }
 
 function HeatmapLegend({
@@ -574,10 +554,7 @@ function PinHighlight({
   geometry: PlotGeometry;
   pin: CellIndex;
 }) {
-  const left = geometry.columnEdges[pin.attacker];
-  const right = geometry.columnEdges[pin.attacker + 1];
-  const bottom = geometry.rowEdges[pin.defender];
-  const top = geometry.rowEdges[pin.defender + 1];
+  const { left, right, bottom, top } = cellEdges(geometry, pin);
   return (
     <g pointerEvents="none" fill="none" className={PIN_STROKE}>
       <path
@@ -607,10 +584,7 @@ function HoverCrosshair({
   geometry: PlotGeometry;
   hover: CellIndex;
 }) {
-  const left = geometry.columnEdges[hover.attacker];
-  const right = geometry.columnEdges[hover.attacker + 1];
-  const bottom = geometry.rowEdges[hover.defender];
-  const top = geometry.rowEdges[hover.defender + 1];
+  const { left, right, bottom, top } = cellEdges(geometry, hover);
   return (
     <g pointerEvents="none">
       <path
@@ -647,27 +621,20 @@ function HoverCounts({
   devicePixelRatio: number;
   hover: CellIndex;
 }) {
-  const snap = (n: number) =>
-    Math.round(n * devicePixelRatio) / devicePixelRatio;
   const attacker = direction.attackers[hover.attacker];
   const defender = direction.defenders[hover.defender];
-  const left = geometry.columnEdges[hover.attacker];
-  const right = geometry.columnEdges[hover.attacker + 1];
-  const bottom = geometry.rowEdges[hover.defender];
-  const top = geometry.rowEdges[hover.defender + 1];
-  const targetBar = snap(
-    edgeBarLength(
-      attacker.targetCount,
-      counts.targetCount,
-      layout.targetBarLength,
-    ),
+  const { left, right, bottom, top } = cellEdges(geometry, hover);
+  const targetBar = snappedBarLength(
+    attacker.targetCount,
+    counts.targetCount,
+    layout.targetBarLength,
+    devicePixelRatio,
   );
-  const shareBar = snap(
-    edgeBarLength(
-      defender.shareCount,
-      counts.shareCount,
-      layout.shareBarLength,
-    ),
+  const shareBar = snappedBarLength(
+    defender.shareCount,
+    counts.shareCount,
+    layout.shareBarLength,
+    devicePixelRatio,
   );
   return (
     <g className="fill-foreground select-none" pointerEvents="none">
@@ -1073,7 +1040,7 @@ export function TargetHeatmap({
   // Closing the pin takes the panel away, and with it any focus on one of
   // its buttons: focus goes to the plot, so the keys keep working.
   const closePanel = useCallback(() => {
-    onPinChange(closePin());
+    onPinChange(null);
     containerRef.current?.focus();
   }, [containerRef, onPinChange]);
   // A step button that has focus when its step runs out is disabled and hears

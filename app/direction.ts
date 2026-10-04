@@ -1,15 +1,12 @@
+import { fairFight, isTarget, isUnavailable, TargetRange } from "./fair-fight";
 import { FFScouterResult, TornFactionBasicApi } from "./types";
+
+export { fairFight };
+export type { TargetRange };
 
 // One direction of the war: one faction's attackers against the other
 // faction's defenders. Pure data, no React: everything a direction's views
 // (target heatmap, edge bars, tooltip, pinned-cell panel) draw comes from here.
-
-export interface TargetRange {
-  // Minimum FF Target: a fair fight of at least this is a target.
-  minimum: number;
-  // Possible FF Max: a fair fight of this or more is not a target.
-  maximum: number;
-}
 
 export interface DirectionInput {
   attackingFaction: TornFactionBasicApi;
@@ -61,16 +58,10 @@ export interface Direction {
   cells: DirectionCell[][];
 }
 
-// The fair fight of an attacker against a defender, or null (unknown) when
-// either has no battle score estimate.
-export function fairFight(
-  attackerEstimate: number | null,
-  defenderEstimate: number | null,
-): number | null {
-  if (attackerEstimate == null || defenderEstimate == null) {
-    return null;
-  }
-  return 1 + (8 / 3) * (defenderEstimate / attackerEstimate);
+// One cell of a direction, as indexes into its two axes.
+export interface CellIndex {
+  attacker: number;
+  defender: number;
 }
 
 // The difficulty step of a fair fight inside the target range: the range is
@@ -85,19 +76,14 @@ function difficultyStep(ff: number, { minimum, maximum }: TargetRange): number {
   return Math.min(Math.max(step, 0), DIFFICULTY_STEPS - 1);
 }
 
-const UNAVAILABLE_STATES = ["Fallen", "Federal"];
-
 // A faction's available members, lowest battle score estimate first, members
 // with no estimate before all others (the order of the existing charts).
-function axis(
+function buildAxis(
   faction: TornFactionBasicApi,
   estimates: FFScouterResult,
 ): DirectionMember[] {
   return estimates
-    .filter((e) => {
-      const state = faction.members["" + e.player_id]?.status.state;
-      return state == null || !UNAVAILABLE_STATES.includes(state);
-    })
+    .filter((e) => !isUnavailable(faction.members["" + e.player_id]))
     .map((e) => ({
       id: e.player_id,
       name: faction.members["" + e.player_id]?.name ?? "Unknown",
@@ -119,27 +105,26 @@ export function buildDirection({
   defendingEstimates,
   targetRange,
 }: DirectionInput): Direction {
-  const attackers: DirectionAttacker[] = axis(
+  const attackers: DirectionAttacker[] = buildAxis(
     attackingFaction,
     attackingEstimates,
   ).map((member) => ({ ...member, targetCount: 0 }));
-  const defenders: DirectionDefender[] = axis(
+  const defenders: DirectionDefender[] = buildAxis(
     defendingFaction,
     defendingEstimates,
   ).map((member) => ({ ...member, shareCount: 0 }));
   const cells = attackers.map((attacker) =>
     defenders.map((defender) => {
       const ff = fairFight(attacker.estimate, defender.estimate);
-      const isTarget =
-        ff != null && ff >= targetRange.minimum && ff < targetRange.maximum;
-      if (isTarget) {
-        attacker.targetCount++;
-        defender.shareCount++;
+      if (!isTarget(ff, targetRange)) {
+        return { fairFight: ff, isTarget: false, difficulty: null };
       }
+      attacker.targetCount++;
+      defender.shareCount++;
       return {
         fairFight: ff,
-        isTarget,
-        difficulty: isTarget ? difficultyStep(ff, targetRange) : null,
+        isTarget: true,
+        difficulty: difficultyStep(ff, targetRange),
       };
     }),
   );
@@ -350,6 +335,21 @@ function estimateCase(
   });
 }
 
+// An estimate as far as it can be told to be the direction's own: null when
+// it was made for other attackers or, where a hit goal is given, for another
+// hit goal. Such an estimate counts as still being computed.
+export function currentEstimate(
+  estimate: TimeToHits | null,
+  direction: Direction,
+  hitGoal?: number,
+): TimeToHits | null {
+  return estimate != null &&
+    estimate.attackers.length === direction.attackers.length &&
+    (hitGoal == null || estimate.hitGoal === hitGoal)
+    ? estimate
+    : null;
+}
+
 // The time-to-hits estimate of one direction. The same direction and hit goal
 // always give the same numbers. Takes about half a second at 100 by 100, so
 // callers keep it off the render path.
@@ -389,14 +389,20 @@ export function formatDuration(minutes: number): string {
   return rest === 0 ? `${days}d` : `${days}d ${rest}h`;
 }
 
+// The words that stand in for a wait: for an attacker with no targets, for
+// one with no battle score estimate, and while the estimate is being computed.
+export const NEVER_WORDS = "never (no targets)";
+export const NO_ESTIMATE_WORDS = "no estimate";
+export const COMPUTING_WORDS = "computing…";
+
 // A wait as it is written on the page: the median with its band, as in
 // "6h 11m (5h 27m to 6h 33m)", or the words for no wait to give.
 export function formatWait(estimate: WaitEstimate): string {
   if (estimate.kind === "never") {
-    return "never (no targets)";
+    return NEVER_WORDS;
   }
   if (estimate.kind === "none") {
-    return "no estimate";
+    return NO_ESTIMATE_WORDS;
   }
   const { p10, median, p90 } = estimate;
   return `${formatDuration(median)} (${formatDuration(p10)} to ${formatDuration(p90)})`;

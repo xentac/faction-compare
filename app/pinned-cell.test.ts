@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { buildDirection, Direction } from "./direction";
 import {
   canStepPin,
-  closePin,
   firstArrowPin,
   followSelection,
   holdPin,
@@ -200,13 +199,6 @@ describe("stepping a pin", () => {
   test("with nothing pinned there is nothing to step", () => {
     expect(stepPin(null, war, "nextAttacker")).toBeNull();
     expect(canStepPin(null, war, "nextAttacker")).toBe(false);
-  });
-});
-
-describe("closing a pin", () => {
-  test("leaves nothing pinned", () => {
-    expect(closePin()).toBeNull();
-    expect(pinnedCellIndex(closePin(), war)).toBeNull();
   });
 });
 
