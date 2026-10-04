@@ -374,3 +374,16 @@ export function formatDuration(minutes: number): string {
   const rest = hours % 24;
   return rest === 0 ? `${days}d` : `${days}d ${rest}h`;
 }
+
+// A wait as it is written on the page: the median with its band, as in
+// "6h 11m (5h 27m to 6h 33m)", or the words for no wait to give.
+export function formatWait(estimate: WaitEstimate): string {
+  if (estimate.kind === "never") {
+    return "never (no targets)";
+  }
+  if (estimate.kind === "none") {
+    return "no estimate";
+  }
+  const { p10, median, p90 } = estimate;
+  return `${formatDuration(median)} (${formatDuration(p10)} to ${formatDuration(p90)})`;
+}

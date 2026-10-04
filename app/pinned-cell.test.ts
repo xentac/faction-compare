@@ -3,6 +3,7 @@ import { buildDirection, Direction } from "./direction";
 import {
   canStepPin,
   closePin,
+  firstArrowPin,
   followSelection,
   holdPin,
   Pin,
@@ -206,6 +207,23 @@ describe("closing a pin", () => {
   test("leaves nothing pinned", () => {
     expect(closePin()).toBeNull();
     expect(pinnedCellIndex(closePin(), war)).toBeNull();
+  });
+});
+
+describe("the first arrow press with nothing pinned", () => {
+  test("with no selected member, pins the first attacker and first defender", () => {
+    // Ghost against Blank.
+    expect(firstArrowPin(war, null)).toEqual({ attackerId: 2, defenderId: 15 });
+  });
+
+  test("a selected attacker with no targets is pinned against the first defender", () => {
+    // Low has no targets: Low against Blank.
+    expect(firstArrowPin(war, 3)).toEqual({ attackerId: 3, defenderId: 15 });
+  });
+
+  test("a selected attacker with targets is pinned at the easiest end of their run", () => {
+    // Venqua's targets are Nebel (2.60) and Dorn (3.00): Nebel is the easiest.
+    expect(firstArrowPin(war, 1)).toEqual({ attackerId: 1, defenderId: 11 });
   });
 });
 

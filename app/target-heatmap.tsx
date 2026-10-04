@@ -1,4 +1,5 @@
 import {
+  KeyboardEvent,
   PointerEvent,
   ReactNode,
   useCallback,
@@ -18,10 +19,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { fitName, labelEvery } from "./axis-names";
 import { cellDetailRows, DetailRow } from "./cell-details";
-import { DIFFICULTY_STEPS, Direction } from "./direction";
+import { DIFFICULTY_STEPS, Direction, TimeToHits } from "./direction";
 import {
   canStepPin,
   closePin,
+  firstArrowPin,
   Pin,
   pinnedCellIndex,
   PinStep,
@@ -700,7 +702,10 @@ export function CellDetailRows({ rows }: { rows: DetailRow[] }) {
   return (
     <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1.5 leading-none">
       {rows.map((row) => (
-        <div key={row.label} className="col-span-2 grid grid-cols-subgrid">
+        <div
+          key={row.label}
+          className={`col-span-2 grid grid-cols-subgrid ${row.rule ? "border-border mt-0.5 border-t pt-2" : ""}`}
+        >
           <span className="text-muted-foreground">{row.label}</span>
           <span className="text-foreground flex items-center justify-end gap-x-1.5 tabular-nums">
             {row.name != null && <span className="font-bold">{row.name}</span>}
@@ -835,6 +840,15 @@ function PinPanel({
   );
 }
 
+// The step each arrow key makes, as the panel's step buttons do: left and
+// right along the attackers, up and down the defenders.
+const ARROW_STEPS: Record<string, PinStep> = {
+  ArrowLeft: "previousAttacker",
+  ArrowRight: "nextAttacker",
+  ArrowDown: "previousDefender",
+  ArrowUp: "nextDefender",
+};
+
 // The hovered cell and where the pointer is, in the browser window's
 // coordinates.
 interface Hover {
@@ -847,16 +861,21 @@ interface Hover {
 // is held by whoever renders it, so that it outlives the heatmap being
 // unmounted; `onSelectAttacker` is told the pin's attacker whenever a pin is
 // placed or its attacker stepped. `selectedAttackerId` is the selected member
-// of the attacking faction, marked on the attacker axis.
+// of the attacking faction, marked on the attacker axis. `timeToHits` is the direction's estimate for
+// `hitGoal`, or null while it is being computed.
 export function TargetHeatmap({
   direction,
   selectedAttackerId,
+  timeToHits,
+  hitGoal,
   pin,
   onPinChange,
   onSelectAttacker,
 }: {
   direction: Direction;
   selectedAttackerId: number | null;
+  timeToHits: TimeToHits | null;
+  hitGoal: number;
   pin: Pin;
   onPinChange: (pin: Pin) => void;
   onSelectAttacker: (memberId: number) => void;
@@ -949,12 +968,13 @@ export function TargetHeatmap({
   const hoverRows = useMemo(
     () =>
       hoverAttacker != null && hoverDefender != null
-        ? cellDetailRows(direction, {
-            attacker: hoverAttacker,
-            defender: hoverDefender,
-          })
+        ? cellDetailRows(
+            direction,
+            { attacker: hoverAttacker, defender: hoverDefender },
+            { hitGoal, estimate: timeToHits },
+          )
         : null,
-    [direction, hoverAttacker, hoverDefender],
+    [direction, hoverAttacker, hoverDefender, hitGoal, timeToHits],
   );
 
   // Moving the pin to a cell selects its attacker; the defender selects
@@ -1032,18 +1052,68 @@ export function TargetHeatmap({
   const pinRows = useMemo(
     () =>
       pinAttacker != null && pinDefender != null
-        ? cellDetailRows(direction, {
-            attacker: pinAttacker,
-            defender: pinDefender,
-          })
+        ? cellDetailRows(
+            direction,
+            { attacker: pinAttacker, defender: pinDefender },
+            { hitGoal, estimate: timeToHits },
+          )
         : null,
-    [direction, pinAttacker, pinDefender],
+    [direction, pinAttacker, pinDefender, hitGoal, timeToHits],
+  );
+
+  // The keys of the focused plot: the arrows step the pin, or place it when
+  // nothing is pinned, and Escape closes it. Focus stays on the plot
+  // throughout. An arrow never scrolls the page, even at the end of an axis.
+  const pressKey = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+        return;
+      }
+      if (event.key === "Escape") {
+        if (pin) {
+          onPinChange(closePin());
+        }
+        return;
+      }
+      const step = ARROW_STEPS[event.key];
+      if (!step) {
+        return;
+      }
+      event.preventDefault();
+      if (pinCell) {
+        movePin(stepPin(pin, direction, step));
+        return;
+      }
+      const placed = firstArrowPin(direction, selectedAttackerId);
+      if (placed) {
+        onPinChange(placed);
+        onSelectAttacker(placed.attackerId);
+      }
+    },
+    [
+      direction,
+      selectedAttackerId,
+      pin,
+      pinCell,
+      movePin,
+      onPinChange,
+      onSelectAttacker,
+    ],
   );
 
   return (
     <div>
       <HeatmapLegend direction={direction} counts={counts} />
-      <div ref={containerRef} className="w-full">
+      {/* The plot is the tab stop: a click on it focuses it too, so the arrow
+          keys work after a click on a cell. */}
+      <div
+        ref={containerRef}
+        className="focus-visible:ring-ring/50 w-full rounded-sm outline-none focus-visible:ring-[3px]"
+        role="application"
+        aria-label="Target heatmap: the arrow keys move the pinned cell, Escape closes it"
+        tabIndex={0}
+        onKeyDown={pressKey}
+      >
         <svg
           width="100%"
           height={margin.top + PLOT_HEIGHT + margin.bottom}
