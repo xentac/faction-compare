@@ -36,6 +36,7 @@ import { CategoricalChartState } from "recharts/types/chart/types";
 import { DataTable } from "./data-table";
 import { memberView } from "./member-view";
 import { buildDirection } from "./direction";
+import { Pin } from "./pinned-cell";
 import { TargetHeatmap } from "./target-heatmap";
 import { RankedChart } from "./ranked-chart";
 import { useTimeToHits } from "./use-time-to-hits";
@@ -177,6 +178,9 @@ export function MyChart({
 }: ChartInterface) {
   const [leftSelectedId, setLeftSelectedId] = useState<number | null>(null);
   const [rightSelectedId, setRightSelectedId] = useState<number | null>(null);
+  // Each target heatmap has its own pinned cell.
+  const [leftPin, setLeftPin] = useState<Pin>(null);
+  const [rightPin, setRightPin] = useState<Pin>(null);
   const [easyFFMax, setEasyFFMax] = useState<number>(2.5);
   const [possibleFFMax, setPossibleFFMax] = useState<number>(4.0);
   const [minimumFFTarget, setMinimumFFTarget] = useState<number>(1.75);
@@ -508,7 +512,12 @@ export function MyChart({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <TargetHeatmap direction={leftDirection} />
+                <TargetHeatmap
+                  direction={leftDirection}
+                  pin={leftPin}
+                  onPinChange={setLeftPin}
+                  onSelectAttacker={setLeftSelectedId}
+                />
               </CardContent>
             </Card>
             <Card>
@@ -533,7 +542,12 @@ export function MyChart({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <TargetHeatmap direction={rightDirection} />
+                <TargetHeatmap
+                  direction={rightDirection}
+                  pin={rightPin}
+                  onPinChange={setRightPin}
+                  onSelectAttacker={setRightSelectedId}
+                />
               </CardContent>
             </Card>
             <Card>

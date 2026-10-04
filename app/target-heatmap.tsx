@@ -1,5 +1,6 @@
 import {
   PointerEvent,
+  ReactNode,
   useCallback,
   useLayoutEffect,
   useMemo,
@@ -7,9 +8,26 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { fitName, labelEvery } from "./axis-names";
 import { cellDetailRows, DetailRow } from "./cell-details";
 import { DIFFICULTY_STEPS, Direction } from "./direction";
+import {
+  canStepPin,
+  closePin,
+  Pin,
+  pinnedCellIndex,
+  PinStep,
+  placePin,
+  stepPin,
+} from "./pinned-cell";
 import { useTextMeasure } from "./use-text-measure";
 
 // The height of the cell area at every screen width.
@@ -35,6 +53,12 @@ const TOP_COUNT_ROOM = 12;
 const RIGHT_COUNT_ROOM = 22;
 // The gap between the end of a bar and the hovered count printed past it.
 const COUNT_GAP = 3;
+// How far a pointer may drift between going down and lifting and still count
+// as a click or tap rather than a drag.
+const TAP_SLOP = 8;
+// The pin highlight's colour: unlike the hover crosshair's ink and unlike the
+// difficulty ramp, in both themes.
+const PIN_STROKE = "stroke-sky-600 dark:stroke-sky-400";
 
 // The space around the cell area inside the SVG, which holds the edge bars
 // and axis names. It depends only on the card's width, never on the members,
@@ -398,9 +422,10 @@ function HeatmapLegend({
 }
 
 // The axis names: every nth attacker name under the plot, rotated 45 degrees,
-// and every nth defender name to its left. Inert, like the edge bars. While a
-// cell is hovered its two names are bold, whether or not they are among the
-// every nth, and the others are dimmed.
+// and every nth defender name to its left. Inert, like the edge bars. The two
+// names of the pinned cell and of the hovered cell are bold, whether or not
+// they are among the every nth. A pinned name hides the every nth names it
+// would overlap; while a cell is hovered the every nth names are dimmed.
 function AxisNames({
   direction,
   geometry,
@@ -408,6 +433,7 @@ function AxisNames({
   attackerNames,
   defenderNames,
   hover,
+  pin,
 }: {
   direction: Direction;
   geometry: PlotGeometry;
@@ -415,15 +441,25 @@ function AxisNames({
   attackerNames: string[];
   defenderNames: string[];
   hover: CellIndex | null;
+  pin: CellIndex | null;
 }) {
-  const attackerEvery = labelEvery(
-    geometry.width / direction.attackers.length,
-    ATTACKER_LABEL_SPACING,
-  );
-  const defenderEvery = labelEvery(
-    geometry.height / direction.defenders.length,
-    DEFENDER_LABEL_SPACING,
-  );
+  const attackerSlot = geometry.width / direction.attackers.length;
+  const defenderSlot = geometry.height / direction.defenders.length;
+  const attackerEvery = labelEvery(attackerSlot, ATTACKER_LABEL_SPACING);
+  const defenderEvery = labelEvery(defenderSlot, DEFENDER_LABEL_SPACING);
+  // Whether the every nth name at an index is drawn at rest: not when it is
+  // drawn bold instead, nor when it would overlap the pinned name.
+  const resting = (
+    index: number,
+    every: number,
+    slot: number,
+    spacing: number,
+    hovered: number | undefined,
+    pinned: number | undefined,
+  ) =>
+    index % every === 0 &&
+    index !== hovered &&
+    (pinned == null || Math.abs(index - pinned) * slot >= spacing);
   const { columnEdges, rowEdges } = geometry;
   const attackerName = (a: number) => (
     <text
@@ -452,22 +488,75 @@ function AxisNames({
     >
       <g className="fill-muted-foreground" opacity={hover ? 0.4 : undefined}>
         {direction.attackers.map((_, a) =>
-          a % attackerEvery === 0 && a !== hover?.attacker
+          resting(
+            a,
+            attackerEvery,
+            attackerSlot,
+            ATTACKER_LABEL_SPACING,
+            hover?.attacker,
+            pin?.attacker,
+          )
             ? attackerName(a)
             : null,
         )}
         {direction.defenders.map((_, d) =>
-          d % defenderEvery === 0 && d !== hover?.defender
+          resting(
+            d,
+            defenderEvery,
+            defenderSlot,
+            DEFENDER_LABEL_SPACING,
+            hover?.defender,
+            pin?.defender,
+          )
             ? defenderName(d)
             : null,
         )}
       </g>
-      {hover && (
-        <g className="fill-foreground" fontWeight="bold">
-          {attackerName(hover.attacker)}
-          {defenderName(hover.defender)}
-        </g>
-      )}
+      <g className="fill-foreground" fontWeight="bold">
+        {pin && attackerName(pin.attacker)}
+        {pin && defenderName(pin.defender)}
+        {hover && hover.attacker !== pin?.attacker
+          ? attackerName(hover.attacker)
+          : null}
+        {hover && hover.defender !== pin?.defender
+          ? defenderName(hover.defender)
+          : null}
+      </g>
+    </g>
+  );
+}
+
+// The highlight of the pinned cell: its column and row ruled off along both
+// sides and the cell itself boxed, all in the pin's own colour. Lines rather
+// than the hover crosshair's tint, so the two can be told apart when both
+// show, and drawn outside the cell so a cell 2 px wide stays visible.
+function PinHighlight({
+  geometry,
+  pin,
+}: {
+  geometry: PlotGeometry;
+  pin: CellIndex;
+}) {
+  const left = geometry.columnEdges[pin.attacker];
+  const right = geometry.columnEdges[pin.attacker + 1];
+  const bottom = geometry.rowEdges[pin.defender];
+  const top = geometry.rowEdges[pin.defender + 1];
+  return (
+    <g pointerEvents="none" fill="none" className={PIN_STROKE}>
+      <path
+        d={
+          `M${left - 0.5} 0V${geometry.height}M${right + 0.5} 0V${geometry.height}` +
+          `M0 ${top - 0.5}H${geometry.width}M0 ${bottom + 0.5}H${geometry.width}`
+        }
+        strokeWidth={1}
+      />
+      <rect
+        x={left - 2}
+        y={top - 2}
+        width={right - left + 4}
+        height={bottom - top + 4}
+        strokeWidth={2}
+      />
     </g>
   );
 }
@@ -640,6 +729,79 @@ function HoverTooltip({
   );
 }
 
+// The panel of the pinned cell, directly below the plot: the step buttons and
+// the close button in a row that stays put, then the cell's detail rows.
+function PinPanel({
+  rows,
+  canStep,
+  onStep,
+  onClose,
+}: {
+  rows: DetailRow[];
+  canStep: (step: PinStep) => boolean;
+  onStep: (step: PinStep) => void;
+  onClose: () => void;
+}) {
+  const stepButton = (step: PinStep, label: string, icon: ReactNode) => (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="size-8"
+      aria-label={label}
+      title={label}
+      disabled={!canStep(step)}
+      onClick={() => onStep(step)}
+    >
+      {icon}
+    </Button>
+  );
+  return (
+    <div
+      role="group"
+      aria-label="Pinned cell"
+      className="mt-3 flex flex-col gap-3 rounded-lg border p-3 text-xs"
+    >
+      <div className="flex items-start gap-x-2">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="flex items-center gap-x-1.5">
+            <span className="text-muted-foreground">Attacker</span>
+            {stepButton(
+              "previousAttacker",
+              "Previous attacker",
+              <ChevronLeft />,
+            )}
+            {stepButton("nextAttacker", "Next attacker", <ChevronRight />)}
+          </span>
+          <span className="flex items-center gap-x-1.5">
+            <span className="text-muted-foreground">Defender</span>
+            {stepButton(
+              "previousDefender",
+              "Previous defender",
+              <ChevronDown />,
+            )}
+            {stepButton("nextDefender", "Next defender", <ChevronUp />)}
+          </span>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-8 shrink-0"
+          aria-label="Close"
+          title="Close"
+          onClick={onClose}
+        >
+          <X />
+        </Button>
+      </div>
+      <div className="w-max max-w-full">
+        <CellDetailRows rows={rows} />
+      </div>
+    </div>
+  );
+}
+
 // The hovered cell and where the pointer is, in the browser window's
 // coordinates.
 interface Hover {
@@ -648,8 +810,21 @@ interface Hover {
 }
 
 // The target heatmap of one direction of the war: every target coloured by
-// difficulty, attackers along the bottom and defenders up the side.
-export function TargetHeatmap({ direction }: { direction: Direction }) {
+// difficulty, attackers along the bottom and defenders up the side. Its pin
+// is held by whoever renders it, so that it outlives the heatmap being
+// unmounted; `onSelectAttacker` is told the pin's attacker whenever a pin is
+// placed or its attacker stepped.
+export function TargetHeatmap({
+  direction,
+  pin,
+  onPinChange,
+  onSelectAttacker,
+}: {
+  direction: Direction;
+  pin: Pin;
+  onPinChange: (pin: Pin) => void;
+  onSelectAttacker: (memberId: number) => void;
+}) {
   const [containerRef, { width, devicePixelRatio }] =
     useMeasuredWidth<HTMLDivElement>();
   const layout = useMemo(() => plotLayout(width), [width]);
@@ -746,6 +921,82 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
     [direction, hoverAttacker, hoverDefender],
   );
 
+  // Moving the pin to a cell selects its attacker; the defender selects
+  // nothing.
+  const movePin = useCallback(
+    (to: Pin) => {
+      onPinChange(to);
+      if (to && to.attackerId !== pin?.attackerId) {
+        onSelectAttacker(to.attackerId);
+      }
+    },
+    [pin, onPinChange, onSelectAttacker],
+  );
+  // A click or tap places the pin when the pointer lifts where it went down.
+  // A drag never does: on a touch screen the browser takes it over to scroll
+  // the page and cancels the pointer.
+  const press = useRef<{ pointerId: number; x: number; y: number } | null>(
+    null,
+  );
+  const startPress = useCallback(
+    (event: PointerEvent<SVGRectElement>) => {
+      hoverAt(event);
+      press.current =
+        event.isPrimary && event.button === 0
+          ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+          : null;
+    },
+    [hoverAt],
+  );
+  const endPress = useCallback(
+    (event: PointerEvent<SVGRectElement>) => {
+      const down = press.current;
+      press.current = null;
+      if (
+        !down ||
+        down.pointerId !== event.pointerId ||
+        Math.hypot(event.clientX - down.x, event.clientY - down.y) > TAP_SLOP
+      ) {
+        return;
+      }
+      const box = event.currentTarget.getBoundingClientRect();
+      const cell = cellAt(
+        geometry,
+        event.clientX - box.left,
+        event.clientY - box.top,
+      );
+      const placed = cell && placePin(direction, cell);
+      if (placed) {
+        // Selected even when this attacker is already pinned: the selection
+        // may have been changed elsewhere since.
+        onPinChange(placed);
+        onSelectAttacker(placed.attackerId);
+      }
+    },
+    [direction, geometry, onPinChange, onSelectAttacker],
+  );
+  const cancelPress = useCallback(() => {
+    press.current = null;
+    setHover(null);
+  }, []);
+
+  const pinCell = useMemo(
+    () => pinnedCellIndex(pin, direction),
+    [pin, direction],
+  );
+  const pinAttacker = pinCell?.attacker;
+  const pinDefender = pinCell?.defender;
+  const pinRows = useMemo(
+    () =>
+      pinAttacker != null && pinDefender != null
+        ? cellDetailRows(direction, {
+            attacker: pinAttacker,
+            defender: pinDefender,
+          })
+        : null,
+    [direction, pinAttacker, pinDefender],
+  );
+
   return (
     <div>
       <HeatmapLegend direction={direction} counts={counts} />
@@ -780,6 +1031,7 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
               {paths.map((d, step) => (
                 <path key={step} d={d} className={DIFFICULTY_FILL[step]} />
               ))}
+              {pinCell && <PinHighlight geometry={geometry} pin={pinCell} />}
               {hoverCell && (
                 <HoverCrosshair geometry={geometry} hover={hoverCell} />
               )}
@@ -794,9 +1046,10 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
                 height={PLOT_HEIGHT}
                 fill="transparent"
                 onPointerMove={hoverAt}
-                onPointerDown={hoverAt}
+                onPointerDown={startPress}
+                onPointerUp={endPress}
                 onPointerLeave={endHover}
-                onPointerCancel={endHover}
+                onPointerCancel={cancelPress}
               />
             </g>
           )}
@@ -809,6 +1062,7 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
                 attackerNames={attackerNames}
                 defenderNames={defenderNames}
                 hover={hoverCell}
+                pin={pinCell}
               />
               {hoverCell && (
                 <HoverCounts
@@ -824,6 +1078,14 @@ export function TargetHeatmap({ direction }: { direction: Direction }) {
           )}
         </svg>
       </div>
+      {pinRows && (
+        <PinPanel
+          rows={pinRows}
+          canStep={(step) => canStepPin(pin, direction, step)}
+          onStep={(step) => movePin(stepPin(pin, direction, step))}
+          onClose={() => onPinChange(closePin())}
+        />
+      )}
       {hover && hoverRows && (
         <HoverTooltip rows={hoverRows} pointer={hover.pointer} />
       )}
