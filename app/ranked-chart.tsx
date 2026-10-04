@@ -1,6 +1,12 @@
-import { useMemo } from "react";
-import { fitName } from "./axis-names";
-import { Direction, TimeToHits, WaitEstimate } from "./direction";
+import { useMemo, useState } from "react";
+import { fitName, MeasureText } from "./axis-names";
+import {
+  AttackerTimeToHits,
+  Direction,
+  formatWait,
+  TimeToHits,
+  WaitEstimate,
+} from "./direction";
 import { NAME_FORMS, NARROW_BELOW, useMeasuredWidth } from "./target-heatmap";
 import { useTextMeasure } from "./use-text-measure";
 
@@ -37,6 +43,10 @@ const CASES = [
     legend: "defenders med out",
   },
 ] as const;
+// The figure printed on a hovered row is in the regular weight.
+const FIGURE_FORMS = ["normal"];
+// How far the figure's backing reaches past its text on each side.
+const FIGURE_PADDING = 3;
 // Where the words of a row with no time start, from the left of the plot.
 const WORDS_INSET = 4;
 
@@ -99,6 +109,83 @@ function longestTime(estimate: TimeToHits): number {
   return longest;
 }
 
+// What stands between the two cases of a figure printed on one line.
+const FIGURE_SEPARATOR = " · ";
+
+// The figure printed on a hovered row: both cases' medians with their bands.
+export function hoverFigure(waits: AttackerTimeToHits): string | null {
+  if (waits.fullStays.kind !== "time" || waits.medOut.kind !== "time") {
+    return null;
+  }
+  return [
+    formatWait(waits.fullStays),
+    `med out ${formatWait(waits.medOut)}`,
+  ].join(FIGURE_SEPARATOR);
+}
+
+// The gap between the whiskers and the figure printed beside them.
+export const FIGURE_GAP = 6;
+
+// Where a hovered row's figure is printed. `start` and `end` are the ends of
+// the row's whiskers and `x` the left end of the figure, all in pixels from
+// the left of the plot; the card runs from -leftRoom to plotWidth + rightRoom.
+// `width` is the width the figure is drawn in.
+export function figurePlacement({
+  start,
+  end,
+  textWidth,
+  plotWidth,
+  leftRoom,
+  rightRoom,
+}: {
+  start: number;
+  end: number;
+  textWidth: number;
+  plotWidth: number;
+  leftRoom: number;
+  rightRoom: number;
+}): { x: number; width: number } {
+  const cardRight = plotWidth + rightRoom;
+  if (end + FIGURE_GAP + textWidth <= cardRight) {
+    return { x: end + FIGURE_GAP, width: textWidth };
+  }
+  // Left of the whiskers it must not run over the name.
+  if (start - FIGURE_GAP - textWidth >= 0) {
+    return { x: start - FIGURE_GAP - textWidth, width: textWidth };
+  }
+  // No room on either side: it ends at the card's edge, over the whiskers,
+  // and is squeezed if the whole card is too narrow for it.
+  const width = Math.min(textWidth, leftRoom + cardRight);
+  return { x: cardRight - width, width };
+}
+
+// How a hovered row's figure is laid out: on one line where that leaves the
+// name uncovered, otherwise on two lines, one per case, which start together
+// and are placed by the longer one. `wholeWidth` is the width of the one line,
+// `lineWidths` those of the two.
+export function figureLayout({
+  wholeWidth,
+  lineWidths,
+  ...row
+}: {
+  start: number;
+  end: number;
+  wholeWidth: number;
+  lineWidths: number[];
+  plotWidth: number;
+  leftRoom: number;
+  rightRoom: number;
+}): { x: number; width: number; split: boolean } {
+  const whole = figurePlacement({ ...row, textWidth: wholeWidth });
+  if (whole.x >= 0) {
+    return { ...whole, split: false };
+  }
+  return {
+    ...figurePlacement({ ...row, textWidth: Math.max(...lineWidths) }),
+    split: true,
+  };
+}
+
 // One case's mark: a line from the 10th to the 90th percentile and a dot at
 // the median, filled for full stays and hollow for the med-out case. The x
 // positions are in pixels.
@@ -140,6 +227,81 @@ function WaitMark({
   );
 }
 
+// The figures of a hovered row, printed beside its whiskers on a backing of
+// the highlight's colour, which hides the whiskers where it has to cover them.
+// `y` is the top of the row. A figure split in two has its second line on the
+// row below, or its first on the row above when the row is the last.
+function HoverFigure({
+  waits,
+  x,
+  y,
+  lastRow,
+  plotWidth,
+  layout,
+  measure,
+}: {
+  waits: AttackerTimeToHits;
+  x: (minutes: number) => number;
+  y: number;
+  lastRow: boolean;
+  plotWidth: number;
+  layout: RankedLayout;
+  measure: MeasureText;
+}) {
+  const figure = hoverFigure(waits);
+  if (figure == null) {
+    return null;
+  }
+  const parts = figure.split(FIGURE_SEPARATOR);
+  let start = Infinity;
+  let end = -Infinity;
+  for (const { key } of CASES) {
+    const wait = waits[key];
+    if (wait.kind === "time") {
+      start = Math.min(start, x(Math.min(wait.p10, wait.median)) - DOT_RADIUS);
+      end = Math.max(end, x(Math.max(wait.p90, wait.median)) + DOT_RADIUS);
+    }
+  }
+  const placed = figureLayout({
+    start,
+    end,
+    wholeWidth: measure(figure),
+    lineWidths: parts.map(measure),
+    plotWidth,
+    leftRoom: layout.left,
+    // Drawn text can be a fraction of a pixel wider than it measured.
+    rightRoom: layout.right - 1,
+  });
+  const lines = placed.split ? parts : [figure];
+  const top = placed.split && lastRow ? y - ROW_HEIGHT : y;
+  return (
+    <g pointerEvents="none">
+      <rect
+        x={placed.x - FIGURE_PADDING}
+        y={top}
+        width={placed.width + 2 * FIGURE_PADDING}
+        height={lines.length * ROW_HEIGHT}
+        className="fill-muted"
+      />
+      {lines.map((line, i) => (
+        <text
+          key={i}
+          x={placed.x}
+          y={top + i * ROW_HEIGHT + ROW_HEIGHT / 2}
+          dominantBaseline="central"
+          className="fill-foreground"
+          {...(placed.width < measure(line) && {
+            textLength: placed.width,
+            lengthAdjust: "spacingAndGlyphs",
+          })}
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 function RankedLegend() {
   return (
     <div className="text-muted-foreground mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -158,14 +320,19 @@ function RankedLegend() {
 
 // The ranked chart of one direction of the war: one row per attacker,
 // strongest first, showing how long they wait for targets before reaching
-// the hit goal. `estimate` is null while it is being computed.
+// the hit goal. `estimate` is null while it is being computed. Hovering a row
+// highlights it and prints its figures; clicking it selects its attacker.
 export function RankedChart({
   direction,
   estimate,
+  onSelectAttacker,
 }: {
   direction: Direction;
   estimate: TimeToHits | null;
+  onSelectAttacker?: (memberId: number) => void;
 }) {
+  // The hovered row, by its attacker's member id.
+  const [hovered, setHovered] = useState<number | null>(null);
   const [containerRef, { width }] = useMeasuredWidth<HTMLDivElement>();
   const layout = useMemo(() => rankedLayout(width), [width]);
   const plotWidth = Math.max(0, width - layout.left - layout.right);
@@ -191,6 +358,12 @@ export function RankedChart({
     [rows, layout.nameSpace, measure],
   );
 
+  const measureFigure = useTextMeasure(
+    containerRef,
+    FIGURE_FORMS,
+    layout.fontSize,
+  );
+
   // An estimate for another set of attackers is never drawn.
   const shown =
     estimate && estimate.attackers.length === direction.attackers.length
@@ -203,6 +376,9 @@ export function RankedChart({
   );
   const x = (minutes: number) => (minutes / longest) * plotWidth;
   const rowsHeight = rows.length * ROW_HEIGHT;
+  const hoveredRow = rows.findIndex(({ attacker }) => attacker.id === hovered);
+  const hoveredWaits =
+    hoveredRow >= 0 ? shown?.attackers[rows[hoveredRow].index] : undefined;
 
   return (
     <div>
@@ -214,6 +390,7 @@ export function RankedChart({
           className="block"
           role="img"
           aria-label={`Time to the hit goal for ${rows.length} attackers`}
+          onPointerLeave={() => setHovered(null)}
         >
           {plotWidth > 0 && (
             <g
@@ -259,15 +436,35 @@ export function RankedChart({
                   // Whether there is a time at all is the same in both
                   // cases, so the words are written once.
                   const kind = waits?.fullStays.kind;
+                  const isHovered = hovered === attacker.id;
                   return (
-                    <g key={attacker.id}>
+                    <g
+                      key={attacker.id}
+                      className="cursor-pointer"
+                      onPointerEnter={() => setHovered(attacker.id)}
+                      onClick={() => onSelectAttacker?.(attacker.id)}
+                    >
+                      {/* The highlight, and at rest the row's hit area. */}
+                      <rect
+                        x={-layout.left}
+                        y={row * ROW_HEIGHT}
+                        width={width}
+                        height={ROW_HEIGHT}
+                        className={
+                          isHovered ? "fill-muted" : "fill-transparent"
+                        }
+                      />
                       {names && (
                         <text
                           x={-NAME_GAP}
                           y={y}
                           textAnchor="end"
                           dominantBaseline="central"
-                          className="fill-muted-foreground"
+                          className={
+                            isHovered
+                              ? "fill-foreground font-bold"
+                              : "fill-muted-foreground"
+                          }
                         >
                           {names[row]}
                         </text>
@@ -311,6 +508,18 @@ export function RankedChart({
                     </g>
                   );
                 })}
+                {/* After the rows: its second line lies over another row. */}
+                {hoveredWaits && measureFigure && (
+                  <HoverFigure
+                    waits={hoveredWaits}
+                    x={x}
+                    y={hoveredRow * ROW_HEIGHT}
+                    lastRow={hoveredRow === rows.length - 1}
+                    plotWidth={plotWidth}
+                    layout={layout}
+                    measure={measureFigure}
+                  />
+                )}
               </g>
             </g>
           )}

@@ -549,6 +549,7 @@ export function MyChart({
               </CardHeader>
               <CardContent>
                 <RankedChart
+                  onSelectAttacker={setLeftSelectedId}
                   direction={leftDirection}
                   estimate={leftTimeToHits}
                 />
@@ -582,6 +583,7 @@ export function MyChart({
               </CardHeader>
               <CardContent>
                 <RankedChart
+                  onSelectAttacker={setRightSelectedId}
                   direction={rightDirection}
                   estimate={rightTimeToHits}
                 />
