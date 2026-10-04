@@ -514,6 +514,8 @@ export function MyChart({
               <CardContent>
                 <TargetHeatmap
                   direction={leftDirection}
+                  timeToHits={leftTimeToHits}
+                  hitGoal={hitGoal}
                   pin={leftPin}
                   onPinChange={setLeftPin}
                   onSelectAttacker={setLeftSelectedId}
@@ -544,6 +546,8 @@ export function MyChart({
               <CardContent>
                 <TargetHeatmap
                   direction={rightDirection}
+                  timeToHits={rightTimeToHits}
+                  hitGoal={hitGoal}
                   pin={rightPin}
                   onPinChange={setRightPin}
                   onSelectAttacker={setRightSelectedId}

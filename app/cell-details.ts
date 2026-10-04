@@ -1,4 +1,10 @@
-import { Direction, DirectionMember } from "./direction";
+import {
+  AttackerTimeToHits,
+  Direction,
+  DirectionMember,
+  formatWait,
+  TimeToHits,
+} from "./direction";
 
 // The detail rows of one cell of a target heatmap: what the hover tooltip and
 // the pinned-cell panel say about an attacker and a defender. Pure data, no
@@ -14,6 +20,15 @@ export interface DetailRow {
   difficulty?: number;
   // A remark on the value, such as why the cell is not a target.
   note?: string;
+  // A rule is drawn above this row.
+  rule?: true;
+}
+
+// The time-to-hits estimate the rows end with: the hit goal it is for, and
+// the estimate of the cell's direction, or null while it is being computed.
+export interface CellTimes {
+  hitGoal: number;
+  estimate: TimeToHits | null;
 }
 
 function targets(count: number): string {
@@ -29,9 +44,12 @@ function estimate(member: DirectionMember): string {
 }
 
 // The rows for the cell at the given indexes into the direction's two axes.
+// The last two, under a rule, are about the attacker alone: their time to the
+// hit goal in both cases.
 export function cellDetailRows(
   direction: Direction,
   cell: { attacker: number; defender: number },
+  times: CellTimes,
 ): DetailRow[] {
   const attacker = direction.attackers[cell.attacker];
   const defender = direction.defenders[cell.defender];
@@ -56,6 +74,16 @@ export function cellDetailRows(
           } no battle score estimate`;
   }
 
+  // An estimate made for another hit goal or other attackers is not this
+  // cell's: it counts as still being computed.
+  const current =
+    times.estimate != null &&
+    times.estimate.hitGoal === times.hitGoal &&
+    times.estimate.attackers.length === direction.attackers.length;
+  const waits = current ? times.estimate?.attackers[cell.attacker] : undefined;
+  const wait = (key: keyof AttackerTimeToHits) =>
+    waits == null ? "computing…" : formatWait(waits[key]);
+
   return [
     {
       label: "Attacker",
@@ -70,5 +98,11 @@ export function cellDetailRows(
     fairFightRow,
     { label: "Attacker estimate", value: estimate(attacker) },
     { label: "Defender estimate", value: estimate(defender) },
+    {
+      label: `Time to ${times.hitGoal} hits`,
+      value: wait("fullStays"),
+      rule: true,
+    },
+    { label: "if defenders med out", value: wait("medOut") },
   ];
 }

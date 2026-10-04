@@ -18,7 +18,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { fitName, labelEvery } from "./axis-names";
 import { cellDetailRows, DetailRow } from "./cell-details";
-import { DIFFICULTY_STEPS, Direction } from "./direction";
+import { DIFFICULTY_STEPS, Direction, TimeToHits } from "./direction";
 import {
   canStepPin,
   closePin,
@@ -667,7 +667,10 @@ export function CellDetailRows({ rows }: { rows: DetailRow[] }) {
   return (
     <div className="grid grid-cols-[auto_auto] gap-x-4 gap-y-1.5 leading-none">
       {rows.map((row) => (
-        <div key={row.label} className="col-span-2 grid grid-cols-subgrid">
+        <div
+          key={row.label}
+          className={`col-span-2 grid grid-cols-subgrid ${row.rule ? "border-border mt-0.5 border-t pt-2" : ""}`}
+        >
           <span className="text-muted-foreground">{row.label}</span>
           <span className="text-foreground flex items-center justify-end gap-x-1.5 tabular-nums">
             {row.name != null && <span className="font-bold">{row.name}</span>}
@@ -813,14 +816,19 @@ interface Hover {
 // difficulty, attackers along the bottom and defenders up the side. Its pin
 // is held by whoever renders it, so that it outlives the heatmap being
 // unmounted; `onSelectAttacker` is told the pin's attacker whenever a pin is
-// placed or its attacker stepped.
+// placed or its attacker stepped. `timeToHits` is the direction's estimate
+// for `hitGoal`, or null while it is being computed.
 export function TargetHeatmap({
   direction,
+  timeToHits,
+  hitGoal,
   pin,
   onPinChange,
   onSelectAttacker,
 }: {
   direction: Direction;
+  timeToHits: TimeToHits | null;
+  hitGoal: number;
   pin: Pin;
   onPinChange: (pin: Pin) => void;
   onSelectAttacker: (memberId: number) => void;
@@ -913,12 +921,13 @@ export function TargetHeatmap({
   const hoverRows = useMemo(
     () =>
       hoverAttacker != null && hoverDefender != null
-        ? cellDetailRows(direction, {
-            attacker: hoverAttacker,
-            defender: hoverDefender,
-          })
+        ? cellDetailRows(
+            direction,
+            { attacker: hoverAttacker, defender: hoverDefender },
+            { hitGoal, estimate: timeToHits },
+          )
         : null,
-    [direction, hoverAttacker, hoverDefender],
+    [direction, hoverAttacker, hoverDefender, hitGoal, timeToHits],
   );
 
   // Moving the pin to a cell selects its attacker; the defender selects
@@ -989,12 +998,13 @@ export function TargetHeatmap({
   const pinRows = useMemo(
     () =>
       pinAttacker != null && pinDefender != null
-        ? cellDetailRows(direction, {
-            attacker: pinAttacker,
-            defender: pinDefender,
-          })
+        ? cellDetailRows(
+            direction,
+            { attacker: pinAttacker, defender: pinDefender },
+            { hitGoal, estimate: timeToHits },
+          )
         : null,
-    [direction, pinAttacker, pinDefender],
+    [direction, pinAttacker, pinDefender, hitGoal, timeToHits],
   );
 
   return (
