@@ -1,15 +1,12 @@
+import { fairFight, isTarget, isUnavailable, TargetRange } from "./fair-fight";
 import { FFScouterResult, TornFactionBasicApi } from "./types";
+
+export { fairFight };
+export type { TargetRange };
 
 // One direction of the war: one faction's attackers against the other
 // faction's defenders. Pure data, no React: everything a direction's views
 // (target heatmap, edge bars, tooltip, pinned-cell panel) draw comes from here.
-
-export interface TargetRange {
-  // Minimum FF Target: a fair fight of at least this is a target.
-  minimum: number;
-  // Possible FF Max: a fair fight of this or more is not a target.
-  maximum: number;
-}
 
 export interface DirectionInput {
   attackingFaction: TornFactionBasicApi;
@@ -47,6 +44,9 @@ export interface DirectionCell {
 }
 
 export const DIFFICULTY_STEPS = 5;
+// How far short of a span boundary, as a fraction of a span, still counts as
+// on it.
+const BOUNDARY_TOLERANCE = 1e-9;
 
 export interface Direction {
   targetRange: TargetRange;
@@ -58,40 +58,32 @@ export interface Direction {
   cells: DirectionCell[][];
 }
 
-// The fair fight of an attacker against a defender, or null (unknown) when
-// either has no battle score estimate.
-export function fairFight(
-  attackerEstimate: number | null,
-  defenderEstimate: number | null,
-): number | null {
-  if (attackerEstimate == null || defenderEstimate == null) {
-    return null;
-  }
-  return 1 + (8 / 3) * (defenderEstimate / attackerEstimate);
+// One cell of a direction, as indexes into its two axes.
+export interface CellIndex {
+  attacker: number;
+  defender: number;
 }
 
 // The difficulty step of a fair fight inside the target range: the range is
 // cut into DIFFICULTY_STEPS equal spans, each including its lower end.
 function difficultyStep(ff: number, { minimum, maximum }: TargetRange): number {
+  // A fair fight on a boundary can come out a hair under it in floating
+  // point; anything this close to the next span belongs to it.
   const step = Math.floor(
-    ((ff - minimum) / (maximum - minimum)) * DIFFICULTY_STEPS,
+    ((ff - minimum) / (maximum - minimum)) * DIFFICULTY_STEPS +
+      BOUNDARY_TOLERANCE,
   );
   return Math.min(Math.max(step, 0), DIFFICULTY_STEPS - 1);
 }
 
-const UNAVAILABLE_STATES = ["Fallen", "Federal"];
-
 // A faction's available members, lowest battle score estimate first, members
 // with no estimate before all others (the order of the existing charts).
-function axis(
+function buildAxis(
   faction: TornFactionBasicApi,
   estimates: FFScouterResult,
 ): DirectionMember[] {
   return estimates
-    .filter((e) => {
-      const state = faction.members["" + e.player_id]?.status.state;
-      return state == null || !UNAVAILABLE_STATES.includes(state);
-    })
+    .filter((e) => !isUnavailable(faction.members["" + e.player_id]))
     .map((e) => ({
       id: e.player_id,
       name: faction.members["" + e.player_id]?.name ?? "Unknown",
@@ -113,27 +105,26 @@ export function buildDirection({
   defendingEstimates,
   targetRange,
 }: DirectionInput): Direction {
-  const attackers: DirectionAttacker[] = axis(
+  const attackers: DirectionAttacker[] = buildAxis(
     attackingFaction,
     attackingEstimates,
   ).map((member) => ({ ...member, targetCount: 0 }));
-  const defenders: DirectionDefender[] = axis(
+  const defenders: DirectionDefender[] = buildAxis(
     defendingFaction,
     defendingEstimates,
   ).map((member) => ({ ...member, shareCount: 0 }));
   const cells = attackers.map((attacker) =>
     defenders.map((defender) => {
       const ff = fairFight(attacker.estimate, defender.estimate);
-      const isTarget =
-        ff != null && ff >= targetRange.minimum && ff < targetRange.maximum;
-      if (isTarget) {
-        attacker.targetCount++;
-        defender.shareCount++;
+      if (!isTarget(ff, targetRange)) {
+        return { fairFight: ff, isTarget: false, difficulty: null };
       }
+      attacker.targetCount++;
+      defender.shareCount++;
       return {
         fairFight: ff,
-        isTarget,
-        difficulty: isTarget ? difficultyStep(ff, targetRange) : null,
+        isTarget: true,
+        difficulty: difficultyStep(ff, targetRange),
       };
     }),
   );
@@ -215,7 +206,7 @@ const RESUME_BELOW = 30;
 // until the cooldown has decayed to under RESUME_BELOW, then resume. The
 // cooldown is looked at when the defender is hit. Everyone starts at zero
 // cooldown; it decays one minute per minute.
-const medOut: HospitalCase = (defenderCount) => {
+export const medOut: HospitalCase = (defenderCount) => {
   // Each defender's cooldown as it was at the time of their last hit.
   const cooldown = new Float64Array(defenderCount);
   const cooldownAt = new Float64Array(defenderCount);
@@ -230,7 +221,7 @@ const medOut: HospitalCase = (defenderCount) => {
       if (now < RESUME_BELOW) {
         resting[defender] = 0;
       }
-    } else if (now + MED_OUT_COOLDOWN > COOLDOWN_CAP) {
+    } else if (now + MED_OUT_COOLDOWN >= COOLDOWN_CAP) {
       resting[defender] = 1;
     }
     if (resting[defender]) {
@@ -291,6 +282,16 @@ function runWar(
   }
 }
 
+// A percentile of samples sorted ascending, by nearest rank: the smallest
+// sample with at least that percentage of the samples at or below it.
+export function nearestRank(
+  sorted: ArrayLike<number>,
+  percentage: number,
+): number {
+  const rank = Math.ceil((percentage * sorted.length) / 100) - 1;
+  return sorted[Math.min(Math.max(rank, 0), sorted.length - 1)];
+}
+
 // Every attacker's estimate in one case.
 function estimateCase(
   direction: Direction,
@@ -325,15 +326,28 @@ function estimateCase(
       return { kind: "never" };
     }
     const sorted = samples[a].sort();
-    const percentile = (p: number) =>
-      sorted[Math.min(Math.floor(p * ESTIMATE_RUNS), ESTIMATE_RUNS - 1)];
     return {
       kind: "time",
-      p10: percentile(0.1),
-      median: percentile(0.5),
-      p90: percentile(0.9),
+      p10: nearestRank(sorted, 10),
+      median: nearestRank(sorted, 50),
+      p90: nearestRank(sorted, 90),
     };
   });
+}
+
+// An estimate as far as it can be told to be the direction's own: null when
+// it was made for other attackers or, where a hit goal is given, for another
+// hit goal. Such an estimate counts as still being computed.
+export function currentEstimate(
+  estimate: TimeToHits | null,
+  direction: Direction,
+  hitGoal?: number,
+): TimeToHits | null {
+  return estimate != null &&
+    estimate.attackers.length === direction.attackers.length &&
+    (hitGoal == null || estimate.hitGoal === hitGoal)
+    ? estimate
+    : null;
 }
 
 // The time-to-hits estimate of one direction. The same direction and hit goal
@@ -375,14 +389,20 @@ export function formatDuration(minutes: number): string {
   return rest === 0 ? `${days}d` : `${days}d ${rest}h`;
 }
 
+// The words that stand in for a wait: for an attacker with no targets, for
+// one with no battle score estimate, and while the estimate is being computed.
+export const NEVER_WORDS = "never (no targets)";
+export const NO_ESTIMATE_WORDS = "no estimate";
+export const COMPUTING_WORDS = "computing…";
+
 // A wait as it is written on the page: the median with its band, as in
 // "6h 11m (5h 27m to 6h 33m)", or the words for no wait to give.
 export function formatWait(estimate: WaitEstimate): string {
   if (estimate.kind === "never") {
-    return "never (no targets)";
+    return NEVER_WORDS;
   }
   if (estimate.kind === "none") {
-    return "no estimate";
+    return NO_ESTIMATE_WORDS;
   }
   const { p10, median, p90 } = estimate;
   return `${formatDuration(median)} (${formatDuration(p10)} to ${formatDuration(p90)})`;

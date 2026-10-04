@@ -5,6 +5,8 @@ import {
   estimateTimeToHits,
   formatDuration,
   formatWait,
+  medOut,
+  nearestRank,
   WaitEstimate,
 } from "./direction";
 import { buildFactionData } from "./faction-data";
@@ -128,6 +130,16 @@ describe("difficulty", () => {
     // 1.75 to 4.0 in spans of 0.45: 2.2, 2.65, 3.1, 3.55.
     const usual = direction(alice, theirs);
     expect(steps(usual)).toEqual([0, 1, 2, 2, 3, 4, null, null]);
+  });
+
+  test("a fair fight on the boundary between two spans is in the harder one", () => {
+    // 1.75 to 4.0 in spans of 0.45: 2.65 starts the third span, 3.55 the
+    // fifth.
+    const onBoundaries = faction("Theirs", [
+      { id: 11, name: "2.65", estimate: 618.75 },
+      { id: 12, name: "3.55", estimate: 956.25 },
+    ]);
+    expect(steps(direction(alice, onBoundaries))).toEqual([2, 4]);
   });
 
   test("a cell that is not a target has no difficulty", () => {
@@ -395,6 +407,15 @@ describe("time-to-hits estimate", () => {
     }
   });
 
+  test("a percentile is the nearest-rank sample: the smallest with that share of the samples at or below it", () => {
+    const samples = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    expect(nearestRank(samples, 10)).toBe(1);
+    expect(nearestRank(samples, 50)).toBe(5);
+    expect(nearestRank(samples, 90)).toBe(9);
+    expect(nearestRank(samples, 100)).toBe(10);
+    expect(nearestRank([7], 10)).toBe(7);
+  });
+
   test("the same direction and hit goal give the same numbers", () => {
     expect(estimateTimeToHits(contested, 5)).toEqual(
       estimateTimeToHits(contested, 5),
@@ -435,6 +456,16 @@ describe("time-to-hits estimate", () => {
     // The first 39 hits are always under the cap.
     const wait = medOutWaitOf(oneOnOne, 40, "Alice");
     expect(wait.p90).toBeLessThanOrEqual(39 * 5);
+  });
+
+  test("a med out that would land exactly on the medical cooldown cap does not happen", () => {
+    // One defender hit over and over at the same moment, so nothing decays:
+    // each med out adds 10 minutes, and the 36th would land on 360, the cap.
+    // With the random number at 0 a med out takes 1 minute and a full stay 15.
+    const stayAfterHit = medOut(1);
+    const stays = Array.from({ length: 36 }, () => stayAfterHit(0, 0, () => 0));
+    expect(stays.slice(0, 35)).toEqual(Array(35).fill(1));
+    expect(stays[35]).toBe(15);
   });
 
   test("a defender at the medical cooldown cap serves full stays", () => {

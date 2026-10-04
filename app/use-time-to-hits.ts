@@ -4,7 +4,7 @@ import type { TimeToHitsRequest } from "./time-to-hits.worker";
 
 // Computes one estimate off the render path and hands it to `done`. Returns
 // a function that abandons the computation.
-function computeTimeToHits(
+export function computeTimeToHits(
   direction: Direction,
   hitGoal: number,
   done: (estimate: TimeToHits) => void,
@@ -13,10 +13,14 @@ function computeTimeToHits(
   let worker: Worker | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   // Without a working worker the estimate is computed on the page's thread,
-  // after the browser has had the chance to paint.
+  // after the browser has had the chance to paint. At most once, however
+  // often the worker reports an error.
   const computeHere = () => {
     worker?.terminate();
     worker = null;
+    if (abandoned || timer != null) {
+      return;
+    }
     timer = setTimeout(() => {
       if (!abandoned) {
         done(estimateTimeToHits(direction, hitGoal));
@@ -47,6 +51,28 @@ function computeTimeToHits(
   };
 }
 
+// An estimate together with the direction and hit goal it was made for.
+interface Computed {
+  direction: Direction;
+  hitGoal: number;
+  estimate: TimeToHits;
+}
+
+// Whether a computed estimate was made for this very direction and hit goal.
+// The views' `currentEstimate` can only compare what an estimate carries;
+// here the direction it was made for is known.
+function isFor(
+  computed: Computed | null,
+  direction: Direction,
+  hitGoal: number,
+): computed is Computed {
+  return (
+    computed != null &&
+    computed.direction === direction &&
+    computed.hitGoal === hitGoal
+  );
+}
+
 // The time-to-hits estimate of a direction for a hit goal, computed off the
 // render path. Null while it is still being computed: an estimate made for a
 // different direction or hit goal is never returned.
@@ -60,11 +86,7 @@ export function useTimeToHits(
   hitGoal: number,
   enabled: boolean,
 ): TimeToHits | null {
-  const [computed, setComputed] = useState<{
-    direction: Direction;
-    hitGoal: number;
-    estimate: TimeToHits;
-  } | null>(null);
+  const [computed, setComputed] = useState<Computed | null>(null);
   const latest = useRef(computed);
   useEffect(() => {
     latest.current = computed;
@@ -74,8 +96,7 @@ export function useTimeToHits(
     if (!enabled) {
       return;
     }
-    const have = latest.current;
-    if (have && have.direction === direction && have.hitGoal === hitGoal) {
+    if (isFor(latest.current, direction, hitGoal)) {
       return;
     }
     return computeTimeToHits(direction, hitGoal, (estimate) =>
@@ -83,9 +104,5 @@ export function useTimeToHits(
     );
   }, [direction, hitGoal, enabled]);
 
-  return computed &&
-    computed.direction === direction &&
-    computed.hitGoal === hitGoal
-    ? computed.estimate
-    : null;
+  return isFor(computed, direction, hitGoal) ? computed.estimate : null;
 }

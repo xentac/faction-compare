@@ -1,5 +1,6 @@
 import { ColumnDef } from "@tanstack/react-table";
 import * as z from "zod";
+import { fairFight } from "./fair-fight";
 
 export type keys = { ffScouterKey: string };
 export type factionIds = { leftFactionId: string; rightFactionId: string };
@@ -25,9 +26,9 @@ export class FairFightScore {
     this.id = id;
     this.bss_public = opponent_battle_score;
     this.bs_estimate_human = bs_estimate_human;
-    if (battle_score != null && opponent_battle_score != null) {
-      this.attacker_ff = 1 + (8 / 3) * (opponent_battle_score / battle_score);
-      this.defender_ff = 1 + (8 / 3) * (battle_score / opponent_battle_score);
+    this.attacker_ff = fairFight(battle_score, opponent_battle_score);
+    this.defender_ff = fairFight(opponent_battle_score, battle_score);
+    if (this.attacker_ff != null && this.defender_ff != null) {
       this.attacker_ff_str = this.attacker_ff.toFixed(2);
       this.defender_ff_str = this.defender_ff.toFixed(2);
     }

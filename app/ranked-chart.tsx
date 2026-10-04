@@ -1,13 +1,17 @@
 import { useMemo, useState } from "react";
 import { fitName, MeasureText } from "./axis-names";
+import { NAME_FORMS, nameLayout, useMeasuredWidth } from "./chart-layout";
 import {
   AttackerTimeToHits,
+  COMPUTING_WORDS,
+  currentEstimate,
   Direction,
   formatWait,
+  NEVER_WORDS,
+  NO_ESTIMATE_WORDS,
   TimeToHits,
   WaitEstimate,
 } from "./direction";
-import { NAME_FORMS, NARROW_BELOW, useMeasuredWidth } from "./target-heatmap";
 import { useTextMeasure } from "./use-text-measure";
 
 // The height of one attacker's row; every row is always shown.
@@ -54,20 +58,19 @@ const WORDS_INSET = 4;
 // card's width, never on the members.
 export interface RankedLayout {
   fontSize: number;
-  // The width of the name column: fits a 15-character bold name at both
-  // widths. A wider name is cut to fit.
+  // The width of the name column: the space the heatmap gives an attacker's
+  // name. A wider name is cut to fit.
   nameSpace: number;
   left: number;
   right: number;
 }
 
 export function rankedLayout(cardWidth: number): RankedLayout {
-  const narrow = cardWidth < NARROW_BELOW;
-  const nameSpace = narrow ? 86 : 96;
+  const { fontSize, attackerNameSpace } = nameLayout(cardWidth);
   return {
-    fontSize: narrow ? 9 : 10,
-    nameSpace,
-    left: nameSpace + NAME_GAP,
+    fontSize,
+    nameSpace: attackerNameSpace,
+    left: attackerNameSpace + NAME_GAP,
     right: RIGHT_ROOM,
   };
 }
@@ -112,15 +115,13 @@ function longestTime(estimate: TimeToHits): number {
 // What stands between the two cases of a figure printed on one line.
 const FIGURE_SEPARATOR = " · ";
 
-// The figure printed on a hovered row: both cases' medians with their bands.
-export function hoverFigure(waits: AttackerTimeToHits): string | null {
+// The figure printed on a hovered row: both cases' medians with their bands,
+// one part per case. Null for a row with no time.
+export function hoverFigure(waits: AttackerTimeToHits): string[] | null {
   if (waits.fullStays.kind !== "time" || waits.medOut.kind !== "time") {
     return null;
   }
-  return [
-    formatWait(waits.fullStays),
-    `med out ${formatWait(waits.medOut)}`,
-  ].join(FIGURE_SEPARATOR);
+  return [formatWait(waits.fullStays), `med out ${formatWait(waits.medOut)}`];
 }
 
 // The gap between the whiskers and the figure printed beside them.
@@ -248,11 +249,11 @@ function HoverFigure({
   layout: RankedLayout;
   measure: MeasureText;
 }) {
-  const figure = hoverFigure(waits);
-  if (figure == null) {
+  const parts = hoverFigure(waits);
+  if (parts == null) {
     return null;
   }
-  const parts = figure.split(FIGURE_SEPARATOR);
+  const figure = parts.join(FIGURE_SEPARATOR);
   let start = Infinity;
   let end = -Infinity;
   for (const { key } of CASES) {
@@ -365,10 +366,7 @@ export function RankedChart({
   );
 
   // An estimate for another set of attackers is never drawn.
-  const shown =
-    estimate && estimate.attackers.length === direction.attackers.length
-      ? estimate
-      : null;
+  const shown = currentEstimate(estimate, direction);
   const longest = shown ? longestTime(shown) : 0;
   const ticks = useMemo(
     () => axisTicks(longest, plotWidth),
@@ -426,7 +424,7 @@ export function RankedChart({
                   dominantBaseline="central"
                   className="fill-muted-foreground italic"
                 >
-                  computing…
+                  {COMPUTING_WORDS}
                 </text>
               )}
               <g transform={`translate(0 ${AXIS_HEIGHT})`}>
@@ -441,7 +439,13 @@ export function RankedChart({
                     <g
                       key={attacker.id}
                       className="cursor-pointer"
-                      onPointerEnter={() => setHovered(attacker.id)}
+                      // Hover is for a mouse only: a tapped row would
+                      // otherwise stay highlighted. A tap still selects.
+                      onPointerEnter={(event) =>
+                        setHovered(
+                          event.pointerType === "mouse" ? attacker.id : null,
+                        )
+                      }
                       onClick={() => onSelectAttacker?.(attacker.id)}
                     >
                       {/* The highlight, and at rest the row's hit area. */}
@@ -492,7 +496,7 @@ export function RankedChart({
                           dominantBaseline="central"
                           className="fill-red-600 italic dark:fill-red-400"
                         >
-                          never (no targets)
+                          {NEVER_WORDS}
                         </text>
                       )}
                       {kind === "none" && (
@@ -502,7 +506,7 @@ export function RankedChart({
                           dominantBaseline="central"
                           className="fill-muted-foreground italic"
                         >
-                          no estimate
+                          {NO_ESTIMATE_WORDS}
                         </text>
                       )}
                     </g>

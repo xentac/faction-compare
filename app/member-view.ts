@@ -13,7 +13,7 @@ const NOTHING_SELECTED: MemberView = { name: "", rows: [] };
 export function memberView(
   faction: GraphData[],
   selectedId: number | null,
-  limits: { easyFFMax: number; possibleFFMax: number },
+  settings: { easyFFMax: number; possibleFFMax: number },
 ): MemberView {
   if (selectedId == null) {
     return NOTHING_SELECTED;
@@ -22,7 +22,7 @@ export function memberView(
   if (!member) {
     return NOTHING_SELECTED;
   }
-  const { easyFFMax, possibleFFMax } = limits;
+  const { easyFFMax, possibleFFMax } = settings;
   const flag = (condition: boolean) => (condition ? 1 : 0);
   return {
     name: member.name,

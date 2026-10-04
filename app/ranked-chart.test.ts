@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { figureLayout, figurePlacement, hoverFigure } from "./ranked-chart";
 
 describe("the figure printed on a hovered row", () => {
-  test("both medians with their bands, the med-out case named", () => {
+  test("both medians with their bands, one part per case, the med-out case named", () => {
     expect(
       hoverFigure({
         fullStays: { kind: "time", p10: 198, median: 246, p90: 279 },
         medOut: { kind: "time", p10: 25, median: 33, p90: 37 },
       }),
-    ).toBe("4h 6m (3h 18m to 4h 39m) · med out 33m (25m to 37m)");
+    ).toEqual(["4h 6m (3h 18m to 4h 39m)", "med out 33m (25m to 37m)"]);
   });
 
   test("a row with no time prints nothing: it keeps its own words", () => {
