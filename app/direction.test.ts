@@ -273,16 +273,14 @@ describe("time formatting", () => {
   test("a fraction of a minute is rounded before the units are split", () => {
     expect(formatDuration(59.7)).toBe("1h");
   });
-});
 
-describe("a wait as written", () => {
-  test("a time is its median followed by its band", () => {
+  test("a wait is its median with the band from the 10th to the 90th percentile", () => {
     expect(formatWait({ kind: "time", p10: 327, median: 371, p90: 393 })).toBe(
       "6h 11m (5h 27m to 6h 33m)",
     );
   });
 
-  test("no targets and no estimate are worded as on the ranked chart", () => {
+  test("a wait that never ends or has no estimate is worded as on the ranked chart", () => {
     expect(formatWait({ kind: "never" })).toBe("never (no targets)");
     expect(formatWait({ kind: "none" })).toBe("no estimate");
   });

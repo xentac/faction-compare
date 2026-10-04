@@ -375,9 +375,8 @@ export function formatDuration(minutes: number): string {
   return rest === 0 ? `${days}d` : `${days}d ${rest}h`;
 }
 
-// A wait as it is written on the page: the median followed by its band from
-// the 10th to the 90th percentile, such as "6h 11m (5h 27m to 6h 33m)". An
-// attacker with no targets or no battle score estimate has words instead.
+// A wait as it is written on the page: the median with its band, as in
+// "6h 11m (5h 27m to 6h 33m)", or the words for no wait to give.
 export function formatWait(estimate: WaitEstimate): string {
   if (estimate.kind === "never") {
     return "never (no targets)";
@@ -385,5 +384,6 @@ export function formatWait(estimate: WaitEstimate): string {
   if (estimate.kind === "none") {
     return "no estimate";
   }
-  return `${formatDuration(estimate.median)} (${formatDuration(estimate.p10)} to ${formatDuration(estimate.p90)})`;
+  const { p10, median, p90 } = estimate;
+  return `${formatDuration(median)} (${formatDuration(p10)} to ${formatDuration(p90)})`;
 }
