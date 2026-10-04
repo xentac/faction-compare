@@ -35,6 +35,8 @@ import { buildFactionData } from "./faction-data";
 import { CategoricalChartState } from "recharts/types/chart/types";
 import { DataTable } from "./data-table";
 import { memberView } from "./member-view";
+import { buildDirection } from "./direction";
+import { TargetHeatmap } from "./target-heatmap";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import z from "zod";
@@ -209,6 +211,45 @@ export function MyChart({
       easyFFMax,
       possibleFFMax,
       minimumFFTarget,
+    ],
+  );
+
+  // The two directions of the war: each faction's attackers against the
+  // other faction's defenders.
+  const leftDirection = useMemo(
+    () =>
+      buildDirection({
+        attackingFaction: leftfactionbasic,
+        defendingFaction: rightfactionbasic,
+        attackingEstimates: leftffscouterdata,
+        defendingEstimates: rightffscouterdata,
+        targetRange: { minimum: minimumFFTarget, maximum: possibleFFMax },
+      }),
+    [
+      leftffscouterdata,
+      rightffscouterdata,
+      leftfactionbasic,
+      rightfactionbasic,
+      minimumFFTarget,
+      possibleFFMax,
+    ],
+  );
+  const rightDirection = useMemo(
+    () =>
+      buildDirection({
+        attackingFaction: rightfactionbasic,
+        defendingFaction: leftfactionbasic,
+        attackingEstimates: rightffscouterdata,
+        defendingEstimates: leftffscouterdata,
+        targetRange: { minimum: minimumFFTarget, maximum: possibleFFMax },
+      }),
+    [
+      leftffscouterdata,
+      rightffscouterdata,
+      leftfactionbasic,
+      rightfactionbasic,
+      minimumFFTarget,
+      possibleFFMax,
     ],
   );
 
@@ -421,6 +462,26 @@ export function MyChart({
                 chartType={ChartType.defend}
                 onClick={handleChartClick(setRightSelectedId)}
               />
+            </CardContent>
+          </Card>
+          <Card className="col-span-2 lg:col-span-1">
+            <CardHeader>
+              <CardTitle>
+                Target heatmap ({leftfactionbasic.name} attacking)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TargetHeatmap direction={leftDirection} />
+            </CardContent>
+          </Card>
+          <Card className="col-span-2 lg:col-span-1">
+            <CardHeader>
+              <CardTitle>
+                Target heatmap ({rightfactionbasic.name} attacking)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TargetHeatmap direction={rightDirection} />
             </CardContent>
           </Card>
         </TabsContent>
