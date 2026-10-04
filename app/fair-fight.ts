@@ -33,10 +33,15 @@ export function isTarget(
 
 const UNAVAILABLE_STATES = ["Fallen", "Federal"];
 
-// Whether a member of a faction is unavailable. A player who is not in the
-// faction's member list (`undefined`) has no known state and is not.
-export function isUnavailable(
-  member: { status: { state: string } } | undefined,
-): boolean {
-  return member != null && UNAVAILABLE_STATES.includes(member.status.state);
+// Whether a member of a faction is unavailable.
+export function isUnavailable(member: { status: { state: string } }): boolean {
+  return UNAVAILABLE_STATES.includes(member.status.state);
+}
+
+// Whether a scouted player is listed in the views: they are in the faction's
+// member list (`undefined` when they are not) and are not unavailable.
+export function isListed<M extends { status: { state: string } }>(
+  member: M | undefined,
+): member is M {
+  return member != null && !isUnavailable(member);
 }

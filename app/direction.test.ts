@@ -514,3 +514,29 @@ describe("time-to-hits estimate", () => {
     expect(byName("Weak").medOut).toEqual({ kind: "never" });
   });
 });
+
+describe("a scouted player missing from the faction's member list", () => {
+  const withStray = faction("Theirs", [
+    { id: 11, name: "Two", estimate: 375 },
+    { id: 12, name: "Three", estimate: 750 },
+  ]);
+  withStray.estimates.push({
+    player_id: 99,
+    fair_fight: null,
+    bs_estimate: null,
+    bs_estimate_human: null,
+    bss_public: 750,
+    last_updated: null,
+  });
+
+  test("is on neither axis", () => {
+    expect(direction(alice, withStray).defenders.map((m) => m.name)).toEqual([
+      "Two",
+      "Three",
+    ]);
+    expect(direction(withStray, alice).attackers.map((m) => m.name)).toEqual([
+      "Two",
+      "Three",
+    ]);
+  });
+});

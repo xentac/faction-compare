@@ -1,4 +1,4 @@
-import { fairFight, isTarget, isUnavailable, TargetRange } from "./fair-fight";
+import { fairFight, isListed, isTarget, TargetRange } from "./fair-fight";
 import { FFScouterResult, TornFactionBasicApi } from "./types";
 
 export { fairFight };
@@ -83,10 +83,10 @@ function buildAxis(
   estimates: FFScouterResult,
 ): DirectionMember[] {
   return estimates
-    .filter((e) => !isUnavailable(faction.members["" + e.player_id]))
+    .filter((e) => isListed(faction.members["" + e.player_id]))
     .map((e) => ({
       id: e.player_id,
-      name: faction.members["" + e.player_id]?.name ?? "Unknown",
+      name: faction.members["" + e.player_id].name,
       estimate: e.bss_public,
       estimateHuman: e.bs_estimate_human,
     }))

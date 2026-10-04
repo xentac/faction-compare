@@ -140,14 +140,13 @@ describe("A scouted player missing from the faction's member list", () => {
     last_updated: null,
   });
 
-  test("is kept, as on the target heatmap, under the name Unknown", () => {
+  test("is not listed, as a primary member or as an opponent", () => {
     const { left_data, right_data } = build(ours, withStray);
-    expect(right_data.map((m) => m.name)).toEqual(["Two", "Three", "Unknown"]);
+    expect(right_data.map((m) => m.name)).toEqual(["Two", "Three"]);
     expect(left_data[0].opponent_scores.map((o) => o.name)).toEqual([
       "Two",
       "Three",
-      "Unknown",
     ]);
-    expect(left_data[0].targets_attacks_count).toBe(3);
+    expect(left_data[0].targets_attacks_count).toBe(2);
   });
 });

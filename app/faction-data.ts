@@ -1,4 +1,4 @@
-import { isTarget, isUnavailable } from "./fair-fight";
+import { isListed, isTarget } from "./fair-fight";
 import {
   FairFightScore,
   FFScouterJson,
@@ -52,12 +52,12 @@ export function buildFactionData(
     let member_number = 0;
     return (value: FFScouterJson): GraphData => {
       member_number++;
-      const member: TornMemberApi | undefined =
+      const member: TornMemberApi =
         primaryfaction.members["" + value.player_id];
       const opponent_scores = opponent.map(
         (enemy) =>
           new FairFightScore(
-            opponentfaction.members["" + enemy.player_id]?.name ?? "Unknown",
+            opponentfaction.members["" + enemy.player_id].name,
             "" + enemy.player_id,
             value.bss_public,
             enemy.bss_public,
@@ -100,7 +100,7 @@ export function buildFactionData(
         ),
       };
       return {
-        name: member?.name ?? "Unknown",
+        name: member.name,
         number: member_number,
         id: value.player_id,
         bs_estimate_human: value.bs_estimate_human,
@@ -126,16 +126,15 @@ export function buildFactionData(
     };
   };
 
-  // A scouted player who is not in the member list has no known state and
-  // counts as available, as on the target heatmap.
-  const no_unavailable = (faction: TornFactionBasicApi) => {
+  // Only listed players appear, as primary members or as opponents: a scouted
+  // player who is not in the member list, or who is unavailable, is left out.
+  const listed = (faction: TornFactionBasicApi) => {
     return (item: FFScouterJson) =>
-      !isUnavailable(faction.members["" + item.player_id]);
+      isListed(faction.members["" + item.player_id]);
   };
 
-  // Unavailable members are left out both as primary members and as opponents.
-  const available_left = sorted_left.filter(no_unavailable(leftfactiondata));
-  const available_right = sorted_right.filter(no_unavailable(rightfactiondata));
+  const available_left = sorted_left.filter(listed(leftfactiondata));
+  const available_right = sorted_right.filter(listed(rightfactiondata));
 
   const left_data: GraphData[] = available_left.map(
     map_data(leftfactiondata, rightfactiondata, available_right),
