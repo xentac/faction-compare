@@ -1,5 +1,16 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Data use policy
+
+Torn's API Terms of Service ask every tool to say how it uses the API keys
+and data it handles. This site's policy is in
+[`app/data-policy.ts`](app/data-policy.ts), and the login form shows it under
+"How we use your key".
+
+In short, this site has no server. Your key and the faction IDs you enter are
+kept in your browser's `localStorage`. The key is sent only to `api.torn.com` and
+to FF Scouter.
+
 ## Getting Started
 
 First, run the development server:

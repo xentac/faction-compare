@@ -18,6 +18,8 @@ import {
 import Link from "next/link";
 import { Dispatch, SetStateAction } from "react";
 import { keys } from "./types";
+import { DataPolicyDialog } from "./data-policy-dialog";
+import { FF_SCOUTER_URL } from "./data-policy";
 
 const formSchema = z.object({
   ffScouterKey: z.string().min(16).max(16),
@@ -36,7 +38,6 @@ export function LoginForm({ className, setKeys, ...props }: LoginFormProps) {
   });
 
   function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values);
     localStorage.setItem("keys", JSON.stringify(values));
     setKeys(values);
   }
@@ -44,7 +45,7 @@ export function LoginForm({ className, setKeys, ...props }: LoginFormProps) {
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader>
-          <CardTitle>Enter FF Scouter API keys</CardTitle>
+          <CardTitle>Enter your FF Scouter API key</CardTitle>
         </CardHeader>
         <CardContent>
           <Form {...form}>
@@ -56,10 +57,12 @@ export function LoginForm({ className, setKeys, ...props }: LoginFormProps) {
                   <FormItem>
                     <FormLabel>FF Scouter API Key</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input type="password" autoComplete="off" {...field} />
                     </FormControl>
                     <FormDescription>
-                      This is the key you signed up with at FF Scouter.
+                      Your Torn API key, registered with FF Scouter. This site
+                      needs FF Scouter&apos;s battle stat estimates and
+                      won&apos;t work without one.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -97,13 +100,13 @@ export function LoginForm({ className, setKeys, ...props }: LoginFormProps) {
               </div>
             </div> */}
           <div className="mt-4 text-center text-sm">
-            Don&apos;t have an account?{" "}
             <Link
-              href="http://ffscouter.com"
+              href={FF_SCOUTER_URL}
               className="underline underline-offset-4"
             >
               Create an FF Scouter key
-            </Link>
+            </Link>{" "}
+            · <DataPolicyDialog />
           </div>
         </CardContent>
       </Card>

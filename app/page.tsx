@@ -13,6 +13,7 @@ import { MyChart } from "./chart";
 import { Button } from "@/components/ui/button";
 import { FactionInputForm } from "./faction-input-form";
 import { FactionWarInputForm } from "./faction-war-input-form";
+import { tornFactionUrl } from "./data-policy";
 
 const getKeys = (): keys | undefined => {
   // We need this because window / localstorage might not exist as fast yet (for the first mount)
@@ -20,7 +21,6 @@ const getKeys = (): keys | undefined => {
     return undefined;
   }
   const v = localStorage.getItem("keys");
-  console.log(v);
   if (v == null) {
     return undefined;
   }
@@ -115,16 +115,7 @@ export default function SPA() {
     if (!keys || !factionWarId) {
       return;
     }
-    const queryString = new URLSearchParams({
-      selections: "basic",
-      key: keys.ffScouterKey,
-    });
-    fetch(
-      "https://api.torn.com/faction/" +
-        factionWarId.factionWarId +
-        "?" +
-        queryString.toString(),
-    )
+    fetch(tornFactionUrl(factionWarId.factionWarId, keys.ffScouterKey))
       .then((res) => res.json())
       .then((value) => TornFactionBasicApi.parse(value))
       .then((value: TornFactionBasicApi) => {
@@ -168,16 +159,7 @@ export default function SPA() {
     if (!keys || !factionIds) {
       return;
     }
-    const queryString = new URLSearchParams({
-      selections: "basic",
-      key: keys.ffScouterKey,
-    });
-    fetch(
-      "https://api.torn.com/faction/" +
-        factionIds.leftFactionId +
-        "?" +
-        queryString.toString(),
-    )
+    fetch(tornFactionUrl(factionIds.leftFactionId, keys.ffScouterKey))
       .then((res) => res.json())
       .then((value) => TornFactionBasicApi.parse(value))
       .then((value: TornFactionBasicApi) => setLeftFactionBasic(value))
@@ -186,12 +168,7 @@ export default function SPA() {
         reset();
       }); // TODO: Tell them something
 
-    fetch(
-      "https://api.torn.com/faction/" +
-        factionIds.rightFactionId +
-        "?" +
-        queryString.toString(),
-    )
+    fetch(tornFactionUrl(factionIds.rightFactionId, keys.ffScouterKey))
       .then((res) => res.json())
       .then((value) => TornFactionBasicApi.parse(value))
       .then((value: TornFactionBasicApi) => setRightFactionBasic(value))
